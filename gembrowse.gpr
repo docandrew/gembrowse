@@ -1,0 +1,70 @@
+project Gembrowse is
+   type BuildOption is ("release", "debug");
+   BuildType : BuildOption := external ("build", "debug");
+
+--    HOME := external ("HOME");
+
+   for Languages use ("ada");
+   for Source_Dirs use ("src/**", "include");
+   for Object_Dir use "obj";
+   for Main use ("main.adb");
+   
+   package Linker is
+      case BuildType is
+         when "debug" =>
+            for Switches ("ada") use (
+               "-Llib",
+               "-lcrypto",
+               "-ltls",
+               "-lpthread",
+               "-pg"
+            );
+         when "release" =>
+            for Switches ("ada") use (
+               "-Llib",
+               "-lcrypto",
+               "-lpthread",
+               "-ltls"
+            );
+         when others =>
+            null;
+      end case;
+   end Linker;
+
+   package Builder is
+      for Executable ("main.adb") use "gembrowse";
+   end Builder;
+
+   package Pretty_Printer is
+      for Default_Switches ("ada") use ("-M120", "-i4", "--no-separate-is", "-A0", "-A1", "-A2", "-A4", "-A5");
+   end Pretty_Printer;
+
+   package Binder is
+      for Switches ("ada") use ("-Es");
+   end Binder;
+
+   package Compiler is
+      case BuildType is
+         when "debug" =>
+            for Switches ("ada") use (
+               "-gnat12",
+               "-gnatf",
+               "-gnateE",
+               "-g",
+               "-gnato",
+               "-fstack-check",
+               "-gnatE",
+               "-pg");
+         when "release" =>
+            for Switches ("ada") use (
+               "-gnat12",
+               "-O2",
+               "-mtune=native"
+            );
+         when others =>
+            null;
+      end case;
+      
+   end Compiler;
+
+end Gembrowse;
