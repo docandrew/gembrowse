@@ -3,7 +3,8 @@
 --
 -- Copyright 2022 Jon Andrew
 --
--- @TODO - something getting wonky here with setting italic and strikethrough
+-- @TODO - make the UI elements a little fancier with being "Hot" vs "Active"
+-- and highlight accordingly.
 -------------------------------------------------------------------------------
 with Ada.Interrupts; use Ada.Interrupts;
 with Ada.Interrupts.Names; use Ada.Interrupts.Names;
@@ -11,6 +12,7 @@ with Ada.Real_Time;
 with Ada.Strings.Fixed; use Ada.Strings.Fixed;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Text_IO; use Ada.Text_IO;
+with Interfaces;
 
 with Console;
 
@@ -19,6 +21,8 @@ package body Gembrowse.UI is
     mousex, mousey : Natural := 1;
     click       : Boolean := False;
     activeTab   : Natural := 1;
+
+    quit : Boolean := False;
 
     -- Length of time to render a frame.
     frameTime   : Ada.Real_Time.Time_Span := Ada.Real_Time.Milliseconds (1);
@@ -59,11 +63,16 @@ package body Gembrowse.UI is
     package EventQueues is new Ada.Containers.Indefinite_Vectors (Index_Type => Positive, Element_Type => Event);
     events : EventQueues.Vector;
 
+    ---------------------------------------------------------------------------
+    -- PageState
+    -- Internal representation of a Gemini page and associated metadata
+    ---------------------------------------------------------------------------
     type PageState is record
         title        : Unbounded_String;
         url          : Unbounded_String;
         tlsStatus    : Boolean;
         pageContents : Unbounded_String;
+        bookmarked   : Boolean := False;
         startx       : Positive := 1;             -- beginning of page we've scrolled to
         starty       : Positive := 1;
     end record;
@@ -71,6 +80,9 @@ package body Gembrowse.UI is
     package PageStates is new Ada.Containers.Vectors (Index_Type => Positive, Element_Type => PageState);
     tabs : PageStates.Vector;
 
+    ---------------------------------------------------------------------------
+    -- Theming (color schemes)
+    ---------------------------------------------------------------------------
     type ThemeColor is record
         r : Natural;
         g : Natural;
@@ -148,6 +160,9 @@ package body Gembrowse.UI is
 
     currentTheme : Theme := ayuMirage;
 
+    ---------------------------------------------------------------------------
+    -- newTab
+    ---------------------------------------------------------------------------
     procedure newTab is
         newTabContents : String := 
             "# Gembrowse - Gemini Browser by Jon Andrew" & ASCII.LF &
@@ -162,7 +177,33 @@ package body Gembrowse.UI is
                       tlsStatus     => False, 
                       pageContents  => To_Unbounded_String (newTabContents),
                       others        => <>));
+        
+        activeTab := tabs.Last_Index;
     end newTab;
+
+    ---------------------------------------------------------------------------
+    -- closeTab
+    -- Note that we always have to have a tab open, so if this closes the last
+    -- tab, go ahead and create a new one.
+    ---------------------------------------------------------------------------
+    procedure closeTab (num : Positive) is
+        wasLast : Boolean;
+    begin
+        wasLast := (num = tabs.Last_Index);
+
+        tabs.Delete (num);
+
+        if tabs.Is_Empty then
+            newTab;
+            return;
+        end if;
+
+        -- if we deleted the last tab, and it was active, we need to adjust the
+        -- active tab.
+        if num = activeTab and wasLast then
+            activeTab := tabs.Last_Index;
+        end if;
+    end closeTab;
 
     procedure box (x1, y1, x2, y2 : Natural;
                    topLeft  : String;
@@ -373,6 +414,11 @@ package body Gembrowse.UI is
 
             -- draw remainder of horizontal border
             for x in tx..w-1 loop
+                Console.setCursor (x, 1);
+                Put (" ");
+                Console.setCursor (x, 2);
+                Put (" ");
+                Console.setCursor (x, 3);
                 Put ("═");
             end loop;
             Put ("╗");
@@ -388,14 +434,17 @@ package body Gembrowse.UI is
                 click := False;
             end if;
 
-        end renderTabs;
+            -- show exit button
+            Console.setCursor (w, 1);
+            Put ("✖");
 
+            if click and regionHit (w,1,w,1) then
+                quit := True;
+            end if;
+
+        end renderTabs;
     begin
         Console.setColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
-
-        --@TODO ugly artifacts here from redrawing, just draw the parts not
-        -- being drawn by renderTabs
-        -- box (1,3,w,5,"╔","╗","╠","╣");
 
         renderTabs;
 
@@ -430,11 +479,25 @@ package body Gembrowse.UI is
         -- if CA-signed cert
         Console.setBGColor (currentTheme.note.r, currentTheme.note.g, currentTheme.note.b);
         Put ("🔐");
-
         Console.setBGColor (currentTheme.editorLine.r, currentTheme.editorLine.g, currentTheme.editorLine.b);
         Console.setColor (currentTheme.note.r, currentTheme.note.g, currentTheme.note.b);
-        --Put_Line (" gemini://localhost");
-        Put_Line (To_String (tabs(activeTab).url));
+        Put (" ");
+        --Put (" gemini://localhost");
+        Put (To_String (tabs(activeTab).url));
+
+        -- fill rest of line so address bar looks nice
+        -- Console.getCursor (ax, ay);
+
+        for x in 1 .. w - Length(tabs(activetab).url) - 8 loop
+            Put (" ");
+        end loop;
+
+        -- if Bookmarked, say so.
+        if tabs(activetab).bookmarked then
+            Put ("🔖");
+        else
+            Put ("📑");
+        end if;
     end renderTitle;
 
     ---------------------------------------------------------------------------
@@ -460,7 +523,9 @@ package body Gembrowse.UI is
             null;
         end renderNextLine;
     begin
+        Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
         Console.setColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
+
         -- left vert border
         for y in 6..h-3 loop
             Console.setCursor (1, y);
@@ -522,8 +587,8 @@ package body Gembrowse.UI is
         Console.setCursor (2, h-1);
         Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
         Console.setColor (currentTheme.note.r, currentTheme.note.g, currentTheme.note.b);
-        Put (To_String (status) & To_String (escSequence));
-        -- Put (To_String (status));
+        -- Put (To_String (status) & To_String (escSequence));
+        Put (To_String (status));
     end renderFooter;
 
     ---------------------------------------------------------------------------
@@ -540,17 +605,26 @@ package body Gembrowse.UI is
         end handle;
     end Sigwinch_Handler;
 
-    quit : Boolean := False;
-
     ---------------------------------------------------------------------------
     -- enqueueInputEvents
     -- Read stdin for VT100 control codes, handle appropriately.
     ---------------------------------------------------------------------------
     procedure enqueueInputEvents is
         chr      : Character;
+        pos      : Natural;
         isEsc    : Boolean := False;
 
         curEvent : Event;
+
+        use Interfaces;
+
+        CTRL_D   : constant := 4;
+        CTRL_L   : constant := 12;
+        CTRL_Q   : constant := 17;
+        CTRL_S   : constant := 19;
+        CTRL_T   : constant := 20;
+        CTRL_W   : constant := 23;
+        CTRL_B   : constant := 29;
     begin
         -- returns NUL if no input available
         chr := Console.getch;
@@ -558,8 +632,22 @@ package body Gembrowse.UI is
         if chr = ASCII.NUL then
             return;
         -- @TODO
-        -- elsif chr in ASCII.SOH..ASCII.26 then
-        -- CTRL+x
+        elsif chr in ASCII.SOH..ASCII.SUB then
+            -- CTRL + something
+            pos := Character'Pos (chr);
+            
+            -- copied from Chrome for most part
+            case pos is
+                when CTRL_D => null;        --@TODO save bookmark
+                when CTRL_L => null;        --@TODO jump to address bar
+                when CTRL_Q => quit := True;
+                when CTRL_S => null;        --@TODO save document to disk
+                when CTRL_T => newTab;
+                when CTRL_W => closeTab (activeTab);
+                when CTRL_B => null;        --@TODO show bookmarks
+                when others => null;
+            end case;
+
         elsif chr = ASCII.ESC then
             escSequence := To_Unbounded_String ("");
             isEsc := True;
@@ -583,7 +671,7 @@ package body Gembrowse.UI is
             return;
         end if;
 
-        quit := (if Element (escSequence, 1) = 'q' then True else False);
+        -- quit := (if Element (escSequence, 1) = 'q' then True else False);
         
         if isEsc then
             if To_String (escSequence) = "OP" then
@@ -739,9 +827,12 @@ package body Gembrowse.UI is
         Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
         Console.clear;
 
-        Console.termSize (w, h);
         loop
+            -- check for resize each time around.
+            Console.termSize (w, h);
 
+            --@TODO may need to adjust this or the input handler, it seems
+            -- sometimes we miss mouse clicks
             startTime := Ada.Real_Time.Clock;
             nextPeriod := startTime + Ada.Real_Time.Milliseconds (33);     -- 30 fps
 

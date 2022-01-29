@@ -16,7 +16,8 @@ with termios;
 
 package body Console is
 
-    STDIN_FILENO : constant := 0;
+    STDIN_FILENO  : constant := 0;
+    STDOUT_FILENO : constant := 1;
 
     ---------------------------------------------------------------------------
     -- Need to use C's read() function for compatibility with raw terminal mode
@@ -25,6 +26,24 @@ package body Console is
                    c   : System.Address;
                    len : Interfaces.C.size_t) return Interfaces.C.ptrdiff_t
         with Import, Convention => C, External_Name => "read";
+
+    ---------------------------------------------------------------------------
+    -- Need to use C's ioctl() to get terminal size. It's a varargs function
+    -- but we only use it for one thing so just pass what we need.
+    ---------------------------------------------------------------------------
+    type winsize is record
+        ws_row    : Interfaces.C.unsigned_short;
+        ws_col    : Interfaces.C.unsigned_short;
+        ws_xpixel : Interfaces.C.unsigned_short;
+        ws_ypixel : Interfaces.C.unsigned_short;
+    end record with Convention => C_Pass_By_Copy;
+
+    TIOCGWINSZ : constant := 16#5413#;
+
+    function ioctl (fd  : Interfaces.C.int;
+                    req : Interfaces.C.unsigned_long;
+                    arg : System.Address) return Interfaces.C.int
+        with Import, Convention => C, External_Name => "ioctl";
     
     ---------------------------------------------------------------------------
     -- getch
@@ -204,17 +223,28 @@ package body Console is
 
     ---------------------------------------------------------------------------
     -- termSize
-    -- Query the terminal size. Note that this can't be called when expecting
-    -- other inputs (such as mouse)
     ---------------------------------------------------------------------------
     procedure termSize (width, height : out Natural) is
-        oldX, oldY : Natural;
+        -- oldX, oldY : Natural;
+        ws : winsize;
+        ret : Interfaces.C.int;
+
+        use Interfaces.C;
     begin
+        ret := ioctl (STDOUT_FILENO, TIOCGWINSZ, ws'Address);
+
+        if ret = -1 or ws.ws_col = 0 then
+            width  := 0;
+            height := 0;
+        else
+            width  := Natural(ws.ws_col);
+            height := Natural(ws.ws_row);
+        end if;
         -- save old cursor
-        getCursor (oldX, oldY);
-        setCursor (999, 999);
-        getCursor (width, height);
-        setCursor (oldX, oldY);
+        -- getCursor (oldX, oldY);
+        -- setCursor (999, 999);
+        -- getCursor (width, height);
+        -- setCursor (oldX, oldY);
     end termSize;
 
     procedure setTitle (s : String) is
