@@ -45,6 +45,25 @@ package termios is
 
    subtype cc_t is unsigned_char;  -- /usr/include/x86_64-linux-gnu/bits/termios.h:23
 
+   -- c_cc indices
+   VINTR    : constant := 0;
+   VQUIT    : constant := 1;
+   VERASE   : constant := 2;
+   VKILL    : constant := 3;
+   VEOF     : constant := 4;
+   VTIME    : constant := 5;
+   VMIN     : constant := 6;
+   VSWTC    : constant := 7;
+   VSTART   : constant := 8;
+   VSTOP    : constant := 9;
+   VSUSP    : constant := 10;
+   VEOL     : constant := 11;
+   VREPRINT : constant := 12;
+   VDISCARD : constant := 13;
+   VWERASE  : constant := 14;
+   VLNEXT   : constant := 15;
+   VEOL2    : constant := 16;
+
    subtype speed_t is unsigned;  -- /usr/include/x86_64-linux-gnu/bits/termios.h:24
 
    subtype tcflag_t is unsigned;  -- /usr/include/x86_64-linux-gnu/bits/termios.h:25

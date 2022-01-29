@@ -10,48 +10,92 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Strings.Fixed; use Ada.Strings.Fixed;
 with Ada.Text_IO; use Ada.Text_IO;
 with Interfaces.C;
+with System;
 
 with termios;
 
 package body Console is
 
+    STDIN_FILENO : constant := 0;
+
+    ---------------------------------------------------------------------------
+    -- Need to use C's read() function for compatibility with raw terminal mode
+    ---------------------------------------------------------------------------
+    function read (fd  : Interfaces.C.int;
+                   c   : System.Address;
+                   len : Interfaces.C.size_t) return Interfaces.C.ptrdiff_t
+        with Import, Convention => C, External_Name => "read";
+    
+    ---------------------------------------------------------------------------
+    -- getch
+    -- Return next character available from STDIN, or NUL if nothing available.
+    ---------------------------------------------------------------------------
+    function getch return Character is
+        ret : Character;
+        num : Interfaces.C.ptrdiff_t;
+
+        use Interfaces.C;
+    begin
+        num := read (STDIN_FILENO, ret'Address, 1);
+        
+        if num < 1 then
+            return ASCII.NUL;
+        end if;
+
+        return ret;
+    end getch;
+
+    ---------------------------------------------------------------------------
+    -- altBuffer
+    -- Instruct terminal to use alternate buffer, so previous history goes
+    -- unmolested.
+    ---------------------------------------------------------------------------
     procedure altBuffer is
     begin
         Put (ASCII.ESC & "[?1049h");
     end altBuffer;
 
+    ---------------------------------------------------------------------------
+    -- mainBuffer
+    -- Revert to the terminal's primary buffer when leaving Gembrowse.
+    ---------------------------------------------------------------------------
     procedure mainBuffer is
     begin
         Put (ASCII.ESC & "[?1049l");
     end mainBuffer;
 
-    -- procedure setTerm (buffer : Boolean; echo : Boolean) is
-    --     old : aliased termios.termios;
-    --     cur : aliased termios.termios;
-    --     ign : Interfaces.C.int;
+    old : aliased termios.termios;
 
-    --     use Interfaces.C;
-    -- begin
-    --     ign := termios.tcgetattr (0, old'Access);
-    --     cur := old;
+    ---------------------------------------------------------------------------
+    -- rawMode
+    -- Disable stdin echo and line buffering
+    ---------------------------------------------------------------------------
+    procedure rawMode is
+        cur : aliased termios.termios;
+        ign : Interfaces.C.int;
 
-    --     if echo then
-    --         cur.c_lflag := cur.c_lflag or termios.ECHO;
-    --     else
-    --         cur.c_lflag := cur.c_lflag and (not termios.ECHO);
-    --     end if;
+        use Interfaces.C;
+    begin
+        ign := termios.tcgetattr (STDIN_FILENO, old'Access);
+        cur := old;
 
-    --     if buffer then
-    --         cur.c_lflag := cur.c_lflag or termios.ICANON;
-    --     else
-    --         cur.c_lflag := cur.c_lflag and (not termios.ICANON);
-    --     end if;
-    --     -- if not echo or not buffer then
-    --     --     termios.cfmakeraw (cur'Access);
-    --     -- end if;
+        termios.cfmakeraw (cur'Access);
 
-    --     ign := termios.tcsetattr (0, 0, cur'Access);
-    -- end setTerm;
+        -- for non-blocking read()
+        cur.c_cc(termios.VMIN)  := 0;
+        cur.c_cc(termios.VTIME) := 0;
+
+        ign := termios.tcsetattr (STDIN_FILENO, 0, cur'Access);
+    end rawMode;
+
+    ---------------------------------------------------------------------------
+    -- Restore terminal mode
+    ---------------------------------------------------------------------------
+    procedure normalMode is
+        ign : Interfaces.C.int;
+    begin
+        ign := termios.tcsetattr (0, 0, old'Access);
+    end normalMode;
 
     procedure setColor (r, g, b : Natural) is
     begin
@@ -59,6 +103,7 @@ package body Console is
         Put (r, Width => 0); Put (";");
         Put (g, Width => 0); Put (";");
         Put (b, Width => 0); Put ("m");
+        Flush;
     end setColor;
 
     procedure setBGColor (r, g, b : Natural) is
@@ -67,19 +112,24 @@ package body Console is
         Put (r, Width => 0); Put (";");
         Put (g, Width => 0); Put (";");
         Put (b, Width => 0); Put ("m");
+        -- Flush;
     end setBGColor;
-
-    procedure setCursor (x, y : Natural) is
-    begin
-        Put (ASCII.ESC & "[");
-        Put (y, Width => 0); Put(";");
-        Put (x, Width => 0); Put("H");
-    end setCursor;
 
     procedure resetColor is
     begin
         Put (ASCII.ESC & "[0m");
     end resetColor;
+
+    procedure enableMouse is
+    begin
+        Put (ASCII.ESC & "[?1003h" &    -- any mouse event
+             ASCII.ESC & "[?1006h");    -- additional mouse response
+    end enableMouse;
+
+    procedure disableMouse is
+    begin
+        Put (ASCII.ESC & "[?1000l");
+    end disableMouse;
 
     procedure clear is
     begin
@@ -88,35 +138,40 @@ package body Console is
         Put ("J");
     end clear;
 
+    procedure setCursor (x, y : Natural) is
+    begin
+        Put (ASCII.ESC & "[");
+        Put (y, Width => 0); Put(";");
+        Put (x, Width => 0); Put("H");
+        -- Flush;
+    end setCursor;
+
+    ---------------------------------------------------------------------------
+    -- getCursor
+    -- 
+    -- Need to ensure mouse disabled or we may get extra inputs to STDIN causing
+    -- a race condition.
+    ---------------------------------------------------------------------------
     procedure getCursor (x, y : out Natural) is
         chr : Character;
         ubs : Unbounded_String;
-
-        -- need to disable stdin echo, store the terminal settings here
-        -- ign : Interfaces.C.int;
-        -- old : aliased termios.termios;
-        -- cur : aliased termios.termios;
     begin
-        -- ign := termios.tcgetattr (0, old'Access);
-        -- cur := old;
-        -- termios.cfmakeraw (cur'Access);
-        -- ign := termios.tcsetattr (0, 0, cur'Access);
-
         Put (ASCII.ESC & "[");
         Put (6, Width => 0);
         Put ("n");
 
         -- response should be ESC [ <r> ; <c> R
-        -- has to be done this way since no terminating newline.
-        -- Get_Immediate is used to avoid echo of the response
         loop
-            Get_Immediate (chr);
-            Append (ubs, chr);
+            chr := getch;
+            
+            -- turn this into a blocking read
+            if chr /= ASCII.NUL then
+                Append (ubs, chr);
+            end if;
+
             exit when chr = 'R';
         end loop;
         
-        -- ign := termios.tcsetattr (0, 0, old'Access);
-
         declare
             pos  : String  := To_String (ubs);
             brac : Natural := Index (pos, "[", pos'First);
@@ -129,9 +184,29 @@ package body Console is
             x := col;
             y := row;
         end;
-
     end getCursor;
 
+    ---------------------------------------------------------------------------
+    -- hideCursor
+    ---------------------------------------------------------------------------
+    procedure hideCursor is
+    begin
+        Put (ASCII.ESC & "[?25l");
+    end hideCursor;
+
+    ---------------------------------------------------------------------------
+    -- showCursor
+    ---------------------------------------------------------------------------
+    procedure showCursor is
+    begin
+        Put (ASCII.ESC & "[?25h");
+    end showCursor;
+
+    ---------------------------------------------------------------------------
+    -- termSize
+    -- Query the terminal size. Note that this can't be called when expecting
+    -- other inputs (such as mouse)
+    ---------------------------------------------------------------------------
     procedure termSize (width, height : out Natural) is
         oldX, oldY : Natural;
     begin
@@ -141,6 +216,22 @@ package body Console is
         getCursor (width, height);
         setCursor (oldX, oldY);
     end termSize;
+
+    procedure setTitle (s : String) is
+    begin
+        Put (ASCII.ESC & "]0;" & s & ASCII.ESC & "\");
+    end setTitle;
+
+    -- xterm-specific. Cause terminal to get shift, alt, ctrl info as esc sequence
+    procedure modifyOtherKeys is
+    begin
+        Put (ASCII.ESC & "[>4;2m");
+    end modifyOtherKeys;
+
+    procedure unmodifyOtherKeys is
+    begin
+        Put (ASCII.ESC & "[>4m");
+    end unmodifyOtherKeys;
 
     procedure Heading (s : String) is
     begin
