@@ -21,6 +21,15 @@ package Console is
     procedure setBGColor (r, g, b: Natural);
     procedure resetColor;
 
+    procedure underlineOn;
+    procedure underlineOff;
+
+    procedure boldOn;
+    procedure boldOff;
+
+    procedure italicsOn;
+    procedure italicsOff;
+
     procedure enableMouse;
     procedure disableMouse;
     

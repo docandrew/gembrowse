@@ -6,6 +6,7 @@
 -- @TODO - make the UI elements a little fancier with being "Hot" vs "Active"
 -- and highlight accordingly.
 -------------------------------------------------------------------------------
+with Ada.Assertions; use Ada.Assertions;
 with Ada.Interrupts; use Ada.Interrupts;
 with Ada.Interrupts.Names; use Ada.Interrupts.Names;
 with Ada.Real_Time;
@@ -165,12 +166,18 @@ package body Gembrowse.UI is
     ---------------------------------------------------------------------------
     procedure newTab is
         newTabContents : String := 
-            "# Gembrowse - Gemini Browser by Jon Andrew" & ASCII.LF &
+            "#Gembrowse - Gemini Browser by Jon Andrew" & ASCII.LF &
             "" & ASCII.LF &
-            "## Features" & ASCII.LF &
+            "This is a normal line" & ASCII.LF &
+            ASCII.LF &
+            "##Features" & ASCII.LF &
             "" & ASCII.LF &
-            " * LibreSSL" & ASCII.LF &
-            " * Written in Ada" & ASCII.LF;
+            "* LibreSSL" & ASCII.LF &
+            "* Written in Ada" & ASCII.LF &
+            ASCII.LF &
+            "###Links" & ASCII.LF &
+            ASCII.LF &
+            "=> gemini://docandrew.com/gembrowse Homepage" & ASCII.LF;
     begin
         tabs.Append ((title         => To_Unbounded_String ("New Tab"),
                       url           => To_Unbounded_String ("New Tab"),
@@ -505,23 +512,188 @@ package body Gembrowse.UI is
     -- Render current page contents
     ---------------------------------------------------------------------------
     procedure renderPage is
-        -- viewportCursor : Natural;       -- where in UI we're rendering
-        -- pageCursor : Natural;           -- where in document we're rendering
+        preformatting : Boolean := False;
 
-        procedure renderTextLine is
+        type LineType is (Plain, Link, H1, H2, H3, Preformat, UnorderedList, Quote);
+
+        -----------------------------------------------------------------------
+        -- isWhite
+        -- Return True if character is whitespace, False otherwise.
+        -----------------------------------------------------------------------
+        function isWhite (c : Character) return Boolean is
+        begin
+            return (c = ' ' or c = ASCII.HT or c = ASCII.LF or c = ASCII.CR or c = ASCII.LF);
+        end isWhite;
+
+        -----------------------------------------------------------------------
+        -- setStyle
+        -- Given the type of line, set rendering style accordingly.
+        -----------------------------------------------------------------------
+        procedure setStyle (ln : LineType) is
+        begin
+            case ln is
+                when Plain =>
+                    Console.underlineOff;
+                    -- Console.boldOff;
+                    -- Console.italicsOff;
+                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+                    Console.setColor (currentTheme.fg.r, currentTheme.fg.g, currentTheme.fg.b);
+                when Link =>
+                    --@TODO determine whether a link is visited or not
+                    Console.underlineOn;
+                    -- Console.boldOff;
+                    -- Console.italicsOff;
+                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+                    Console.setColor (currentTheme.unvisitedLink.r, currentTheme.unvisitedLink.g, currentTheme.unvisitedLink.b);
+                when H1 =>
+                    Console.underlineOff;
+                    -- Console.boldOn;
+                    -- Console.italicsOff;
+                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+                    Console.setColor (currentTheme.h1.r, currentTheme.h1.g, currentTheme.h1.b);
+                when H2 =>
+                    Console.underlineOff;
+                    -- Console.boldOn;
+                    -- Console.italicsOff;
+                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+                    Console.setColor (currentTheme.h2.r, currentTheme.h2.g, currentTheme.h2.b);
+                when H3 =>
+                    Console.underlineOff;
+                    -- Console.boldOff;
+                    -- Console.italicsOff;
+                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+                    Console.setColor (currentTheme.h3.r, currentTheme.h3.g, currentTheme.h3.b);
+                when Preformat =>
+                    Console.underlineOff;
+                    -- Console.boldOff;
+                    -- Console.italicsOff;
+                    Console.setBGColor (currentTheme.bgPreformat.r, currentTheme.bgPreformat.g, currentTheme.bgPreformat.b);
+                    Console.setColor (currentTheme.fgPreformat.r, currentTheme.fgPreformat.g, currentTheme.fgPreformat.b);
+                when UnorderedList =>
+                    Console.underlineOff;
+                    -- Console.boldOff;
+                    -- Console.italicsOff;
+                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+                    Console.setColor (currentTheme.fgList.r, currentTheme.fgList.g, currentTheme.fgList.b);
+                when Quote =>
+                    Console.underlineOff;
+                    -- Console.boldOff;
+                    -- Console.italicsOn;
+                    Console.setBGColor (currentTheme.bgQuote.r, currentTheme.bgQuote.g, currentTheme.bgQuote.b);
+                    Console.setColor (currentTheme.fgQuote.r, currentTheme.fgQuote.g, currentTheme.fgQuote.b);
+            end case;
+        end setStyle;
+
+        -----------------------------------------------------------------------
+        -- nextLineType
+        -- Given the page contents and the current render index, look ahead and
+        -- determine the next type of line.
+        -----------------------------------------------------------------------
+        function nextLineType (ubs : Unbounded_String; idx : Natural) return LineType is
+            i : Natural := idx;
+            chr1 : Character;
+            chr2 : Character;
+            chr3 : Character;
+        begin
+            -- assert (Element (ubs, i) = ASCII.CR or Element (ubs, i) = ASCII.LF);
+
+            i := i + 1;
+            if i <= Length (ubs) then
+                chr1 := Element (ubs, i);
+            end if;
+
+            i := i + 1;
+            if i <= Length (ubs) then
+                chr2 := Element (ubs, i);
+            end if;
+
+            i := i + 1;
+            if i <= Length (ubs) then
+                chr3 := Element (ubs, i);
+            end if;
+
+            -- Put ("[" & chr1 & chr2 & chr3 & "] ");
+
+            if chr1 = '=' and chr2 = '>' then
+                return Link;
+            elsif chr1 = '#' and chr2 = '#' and chr3 = '#' then
+                return H3;
+            elsif chr1 = '#' and chr2 = '#' then
+                return H2;
+            elsif chr1 = '#' then
+                return H1;
+            elsif chr1 = '`' and chr2 = '`' and chr3 = '`' then
+                return Preformat;
+            elsif chr1 = '>' then
+                return Quote;
+            elsif chr1 = '*' and chr2 = ' ' then
+                return UnorderedList;
+            else
+                return Plain;
+            end if;
+        end nextLineType;
+
+        -----------------------------------------------------------------------
+        -- parseLink
+        -- Given a text/gemini line containing a link, determine the URL and
+        -- user-friendly description. If no user-friendly description is
+        -- provided, desc will contain the URL.
+        -- @param idx - start of the line containing the link, will be set to
+        --  the end of the link line after this procedure call.
+        -----------------------------------------------------------------------
+        procedure parseLink (line : Unbounded_String; idx : in out Natural; url : out Unbounded_String; desc : out Unbounded_String) is
+            urlStart : Natural;
+            urlEnd : Natural;
+            descStart : Natural;
+            descEnd : Natural;
         begin
             null;
-        end renderTextLine;
+            -- loop
+            -- end loop;
+            -- if Length (desc) = 0 then
+            --    desc := url;
+            -- end if;
+        end parseLink;
 
-        procedure renderPreformattedLine is
+        procedure skipFormatting (lt : LineType; i : in out Natural) is
         begin
-            null;
-        end renderPreformattedLine;
+            -- Depending on line type, we'll skip over the formatting chars.
+            case lt is 
+                when Plain =>
+                    i := i + 1;     -- skip LF
+                when Link =>
+                    i := i + 3;     -- skip LF, =>
+                    Put ("🌐");
+                    -- =>[ws]URL[ws]User-Friendly-Name
+                    -- i := i + 1; -- skip LF
+                    -- parseLink (tabs(activeTab).pageContents, i, url, desc);
+                when H1 =>
+                    i := i + 2;     -- skip LF and #
+                when H2 =>
+                    i := i + 3;     -- skip LF and ##
+                when H3 =>
+                    i := i + 4;     -- skip LF and ###
+                when UnorderedList =>
+                    i := i + 3;     -- skip LF and '* '
+                    Put ("• ");
+                when Quote =>
+                    i := i + 2;   -- skip LF and >
+                when Preformat =>
+                    preformatting := not preformatting;
+                    i := i + 4; -- skip LF and ```
+            end case;
+        end skipFormatting;
 
-        procedure renderNextLine is
-        begin
-            null;
-        end renderNextLine;
+        -- Current viewport coordinates.
+        vx : Natural := 3;
+        vy : Natural := 7;
+
+        -- index into page contents and char at that index
+        i : Natural := 0;
+        c : Character;
+
+        -- type of line being rendered
+        curLineType : LineType;
     begin
         Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
         Console.setColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
@@ -568,10 +740,49 @@ package body Gembrowse.UI is
         Put ("➡");
         Put ("█");
 
-        -- go line-by-line
-        -- renderNextLine;
+        Console.setCursor (vx, vy);
+        
+        if Length(tabs(activeTab).pageContents) = 0 then
+            return;
+        end if;
+
+        -- Determine initial line type.
+        curLineType := nextLineType (tabs(activeTab).pageContents, i);
+        setStyle (curLineType);
+        skipFormatting (curLineType, i);
+
         -- This is a bit inefficent. We process the entire page and then determine whether
         -- the material being rendered is within the current viewport.
+        loop
+            exit when i > Length (tabs(activeTab).pageContents);
+
+            c := Element (tabs(activeTab).pageContents, i);
+
+            if c = ASCII.LF or c = ASCII.CR then
+                vx := 3;
+                vy := vy + 1;
+                Console.setCursor (vx, vy);
+
+                curLineType := nextLineType (tabs(activeTab).pageContents, i);
+
+                setStyle (curLineType);
+                skipFormatting (curLineType, i);
+            else
+                -- if this character is outside of our current viewport, don't render it.
+                -- @TODO sensible line breaks (get length of next word, see if it will exceed viewport)
+                if vx > w - 2 or vy > h - 5 then
+                    null;
+                else
+                    Put (c);
+                end if;
+                i := i + 1;
+            end if;
+        end loop;
+
+        setStyle (Plain);
+        -- Console.underlineOff;
+        -- Console.boldOff;
+        -- Console.italicsOff;
     end renderPage;
 
     escSequence : Unbounded_String;

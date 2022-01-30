@@ -139,6 +139,36 @@ package body Console is
         Put (ASCII.ESC & "[0m");
     end resetColor;
 
+    procedure underlineOn is
+    begin
+        Put (ASCII.ESC & "[4m");
+    end underlineOn;
+
+    procedure underlineOff is
+    begin
+        Put (ASCII.ESC & "[24m");
+    end underlineOff;
+
+    procedure italicsOn is
+    begin
+        Put (ASCII.ESC & "[3m");
+    end italicsOn;
+
+    procedure italicsOff is
+    begin
+        Put (ASCII.ESC & "[23m");
+    end italicsOff;
+
+    procedure boldOn is
+    begin
+        Put (ASCII.ESC & "[1m");
+    end boldOn;
+
+    procedure boldOff is
+    begin
+        Put (ASCII.ESC & "[21m");
+    end boldOff;
+
     procedure enableMouse is
     begin
         Put (ASCII.ESC & "[?1003h" &    -- any mouse event
