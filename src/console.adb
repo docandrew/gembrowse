@@ -270,11 +270,6 @@ package body Console is
             width  := Natural(ws.ws_col);
             height := Natural(ws.ws_row);
         end if;
-        -- save old cursor
-        -- getCursor (oldX, oldY);
-        -- setCursor (999, 999);
-        -- getCursor (width, height);
-        -- setCursor (oldX, oldY);
     end termSize;
 
     procedure setTitle (s : String) is
