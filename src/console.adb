@@ -116,6 +116,10 @@ package body Console is
         ign := termios.tcsetattr (0, 0, old'Access);
     end normalMode;
 
+    ---------------------------------------------------------------------------
+    -- setColor
+    -- set 24-bit RGB Color for text foreground
+    ---------------------------------------------------------------------------
     procedure setColor (r, g, b : Natural) is
     begin
         Put (ASCII.ESC & "[38;2;");
@@ -125,6 +129,15 @@ package body Console is
         Flush;
     end setColor;
 
+    procedure setColor (c : Colors.ThemeColor) is 
+    begin
+        setColor (c.r, c.g, c.b);
+    end setColor;
+
+    ---------------------------------------------------------------------------
+    -- setBGColor
+    -- set 24-bit RGB Color for text background
+    ---------------------------------------------------------------------------
     procedure setBGColor (r, g, b : Natural) is
     begin
         Put (ASCII.ESC & "[48;2;");
@@ -132,6 +145,11 @@ package body Console is
         Put (g, Width => 0); Put (";");
         Put (b, Width => 0); Put ("m");
         -- Flush;
+    end setBGColor;
+
+    procedure setBGColor (c : Colors.ThemeColor) is
+    begin
+        setBGColor (c.r, c.g, c.b);
     end setBGColor;
 
     procedure resetColor is

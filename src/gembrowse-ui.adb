@@ -20,30 +20,43 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Text_IO; use Ada.Text_IO;
 with Interfaces;
 
+with Colors;
 with Console;
+
+with Gembrowse.UI.Buttons; use Gembrowse.UI.Buttons;
+with Gembrowse.UI.Input; use Gembrowse.UI.Input;
+with Gembrowse.UI.Keys;
+with Gembrowse.UI.State; use Gembrowse.UI.State;
+-- with Gembrowse.UI.Tab_Bar;
+with Gembrowse.UI.Scrollbars; use Gembrowse.UI.Scrollbars;
+with Gembrowse.UI.Text_Field; use Gembrowse.UI.Text_Field;
 
 package body Gembrowse.UI is
 
-    mousex, mousey : Natural := 1;
-    click       : Boolean := False;
+    -- mousex, mousey : Natural := 1;
+    -- click       : Boolean := False;
     activeTab   : Natural := 1;
 
-    quit : Boolean := False;
+    -- quit : Boolean := False;
 
     -- Length of time to render a frame.
     frameTime   : Ada.Real_Time.Time_Span := Ada.Real_Time.Milliseconds (1);
 
+    GUI_State : Gembrowse.UI.State.UIState;
+
     -- Address bar selection
-    editingURL  : Boolean := False;
-    cursorPos   : Natural := 0;
-    selectStart : Natural;
-    selectEnd   : Natural;
-    appending   : Boolean := False;
+    -- editingURL  : Boolean := False;
+    -- cursorPos   : Natural := 0;
+    -- selectStart : Natural;
+    -- selectEnd   : Natural;
+    -- appending   : Boolean := False;
 
-    showTooltip : Boolean := True;
-    tooltip : Unbounded_String := To_Unbounded_String ("Welcome to Gembrowse - Copyright 2022 Jon Andrew");
+    -- addressBarState : Gembrowse.UI.AddressBar.TextFieldState;
 
-    w,h : Natural := 0;
+    -- showTooltip : Boolean := True;
+    -- tooltip : Unbounded_String := To_Unbounded_String ("Welcome to Gembrowse - Copyright 2022 Jon Andrew");
+
+    -- w,h : Natural := 0;
 
     -- debugMode : Boolean := True;
 
@@ -65,150 +78,72 @@ package body Gembrowse.UI is
     package PageStates is new Ada.Containers.Vectors (Index_Type => Positive, Element_Type => PageState);
     tabs : PageStates.Vector;
 
-    ---------------------------------------------------------------------------
-    -- Theming (color schemes)
-    ---------------------------------------------------------------------------
-    type ThemeColor is record
-        r : Natural;
-        g : Natural;
-        b : Natural;
-    end record;
-
-    type Theme is record
-        bg              : ThemeColor;       -- screen background
-        fg              : ThemeColor;       -- normal text
-        ui              : ThemeColor;       -- UI elements (borders, buttons)
-        editorLine      : ThemeColor;       -- editable text fields
-        bgSelected      : ThemeColor;       -- bg for highlighted text
-        fgSelected      : ThemeColor;       -- fg for highlighted text
-        h1              : ThemeColor;       -- gmi h1
-        h2              : ThemeColor;       -- gmi h2
-        h3              : ThemeColor;       -- gmi h3
-        visitedLink     : ThemeColor;
-        unvisitedLink   : ThemeColor;
-        bgQuote         : ThemeColor;
-        fgQuote         : ThemeColor;
-        bgPreformat     : ThemeColor;
-        fgPreformat     : ThemeColor;
-        bgList          : ThemeColor;
-        fgList          : ThemeColor;
-        note            : ThemeColor;
-        caution         : ThemeColor;
-        warning         : ThemeColor;
-    end record;
-
-    ayuMirage : Theme := (
-        bg              => (16#24#, 16#29#, 16#36#),
-        fg              => (16#CC#, 16#CA#, 16#C2#),
-        ui              => (16#70#, 16#7A#, 16#8C#),
-        editorLine      => (16#1A#, 16#1F#, 16#29#),
-        bgSelected      => (16#40#, 16#9F#, 16#FF#),
-        fgSelected      => (16#CC#, 16#CA#, 16#C2#),
-        h1              => (16#FF#, 16#DF#, 16#B3#),
-        h2              => (16#FF#, 16#AD#, 16#66#),
-        h3              => (16#F2#, 16#87#, 16#79#),
-        visitedLink     => (16#DF#, 16#BF#, 16#FF#),
-        unvisitedLink   => (16#73#, 16#D0#, 16#FF#),
-        bgQuote         => (16#1A#, 16#1F#, 16#29#),
-        fgQuote         => (16#B8#, 16#CF#, 16#E6#),
-        bgPreformat     => (16#24#, 16#29#, 16#36#),
-        fgPreformat     => (16#FF#, 16#D1#, 16#73#),
-        bgList          => (16#24#, 16#29#, 16#36#),
-        fgList          => (16#D5#, 16#FF#, 16#80#),
-        note            => (16#95#, 16#E6#, 16#CB#),
-        caution         => (16#FF#, 16#AD#, 16#66#),
-        warning         => (16#F2#, 16#87#, 16#79#)
-    );
-
-    ayuLight : Theme := (
-        bg              => (16#FC#, 16#FC#, 16#FC#),
-        fg              => (16#5C#, 16#61#, 16#66#),
-        ui              => (16#8A#, 16#91#, 16#99#),
-        editorLine      => (16#F3#, 16#F4#, 16#F5#),
-        bgSelected      => (16#03#, 16#5B#, 16#D6#),
-        fgSelected      => (16#4C#, 16#61#, 16#66#),
-        h1              => (16#E6#, 16#BA#, 16#7E#),
-        h2              => (16#FA#, 16#8D#, 16#3E#),
-        h3              => (16#F0#, 16#70#, 16#71#),
-        visitedLink     => (16#A3#, 16#7A#, 16#CC#),
-        unvisitedLink   => (16#39#, 16#9E#, 16#E6#),
-        bgQuote         => (16#8A#, 16#91#, 16#99#),
-        fgQuote         => (16#78#, 16#7B#, 16#80#),
-        bgPreformat     => (16#FC#, 16#FC#, 16#FC#),
-        fgPreformat     => (16#F2#, 16#AE#, 16#49#),
-        bgList          => (16#FC#, 16#FC#, 16#FC#),
-        fgList          => (16#86#, 16#B3#, 16#00#),
-        note            => (16#FC#, 16#BF#, 16#99#),
-        caution         => (16#FA#, 16#8D#, 16#3E#),
-        warning         => (16#FF#, 16#73#, 16#83#)
-    );
-
-    currentTheme : Theme := ayuMirage;
+    scrollx : Natural := 0;
 
     ---------------------------------------------------------------------------
     -- select entire address bar
     ---------------------------------------------------------------------------
-    procedure selectAll is
-    begin
-        editingURL := True;
-        cursorPos := 0;
-        selectStart := 1;
-        selectEnd := Length(tabs(activeTab).url);
-    end selectAll;
+    -- procedure selectAll is
+    -- begin
+    --     editingURL := True;
+    --     cursorPos := 0;
+    --     selectStart := 1;
+    --     selectEnd := Length(tabs(activeTab).url);
+    -- end selectAll;
 
     ---------------------------------------------------------------------------
     -- deselect entire address bar
     ---------------------------------------------------------------------------
-    procedure selectNone is
-    begin
-        editingURL := False;
-        cursorPos := 0;
-        selectStart := 0;
-        selectEnd := 0;
-    end selectNone;
+    -- procedure selectNone is
+    -- begin
+    --     editingURL := False;
+    --     cursorPos := 0;
+    --     selectStart := 0;
+    --     selectEnd := 0;
+    -- end selectNone;
 
     ---------------------------------------------------------------------------
     -- cursorLeft
     -- If editing the address bar, move the cursor one place to the left
     ---------------------------------------------------------------------------
-    procedure cursorLeft is
-    begin
-        if cursorPos = 1 then
-            return;
-        elsif cursorPos = 0 then
-            -- selection
-            cursorPos := selectStart;
-            selectEnd := cursorPos;
-            tooltip := To_Unbounded_String ("left A");
-        else
-            cursorPos := cursorPos - 1;
-            selectStart := cursorPos;
-            selectEnd := cursorPos;
-            tooltip := To_Unbounded_String ("left B");
-        end if;
-    end cursorLeft;
+    -- procedure cursorLeft is
+    -- begin
+    --     if cursorPos = 1 then
+    --         return;
+    --     elsif cursorPos = 0 then
+    --         -- selection
+    --         cursorPos := selectStart;
+    --         selectEnd := cursorPos;
+    --         tooltip := To_Unbounded_String ("left A");
+    --     else
+    --         cursorPos := cursorPos - 1;
+    --         selectStart := cursorPos;
+    --         selectEnd := cursorPos;
+    --         tooltip := To_Unbounded_String ("left B");
+    --     end if;
+    -- end cursorLeft;
 
     ---------------------------------------------------------------------------
     -- cursorRight
     -- If editing the address bar, move the cursor one place to the right
     ---------------------------------------------------------------------------
-    procedure cursorRight is
-    begin
-        if cursorPos > Length(tabs(activeTab).url) + 1 then
-            return;
-        elsif cursorPos = 0 then
-            -- selection
-            cursorPos := selectEnd;
-            selectStart := cursorPos;
-            selectEnd := cursorPos;
-            tooltip := To_Unbounded_String ("right A");
-        else
-            cursorPos := cursorPos + 1;
-            selectStart := cursorPos;
-            selectEnd := cursorPos;
-            tooltip := To_Unbounded_String ("right B");
-        end if;
-    end cursorRight;
+    -- procedure cursorRight is
+    -- begin
+    --     if cursorPos > Length(tabs(activeTab).url) + 1 then
+    --         return;
+    --     elsif cursorPos = 0 then
+    --         -- selection
+    --         cursorPos := selectEnd;
+    --         selectStart := cursorPos;
+    --         selectEnd := cursorPos;
+    --         tooltip := To_Unbounded_String ("right A");
+    --     else
+    --         cursorPos := cursorPos + 1;
+    --         selectStart := cursorPos;
+    --         selectEnd := cursorPos;
+    --         tooltip := To_Unbounded_String ("right B");
+    --     end if;
+    -- end cursorRight;
 
     ---------------------------------------------------------------------------
     -- loadPage
@@ -218,9 +153,7 @@ package body Gembrowse.UI is
     ---------------------------------------------------------------------------
     procedure loadPage (url : Unbounded_String) is
     begin
-        showTooltip := True;
-        tooltip := To_Unbounded_String ("Loading " & To_String (url));
-        selectNone;
+        GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (url));
     end loadPage;
 
     ---------------------------------------------------------------------------
@@ -254,7 +187,6 @@ package body Gembrowse.UI is
         activeTab := tabs.Last_Index;
 
         -- highlight whole address bar without having to click
-        selectAll;
     end newTab;
 
     ---------------------------------------------------------------------------
@@ -269,7 +201,8 @@ package body Gembrowse.UI is
 
         tabs.Delete (num);
 
-        selectNone;
+        -- selectNone;
+        -- addressBarState.Active := False;
 
         if tabs.Is_Empty then
             newTab;
@@ -329,7 +262,7 @@ package body Gembrowse.UI is
                    botLeft  : String;
                    botRight : String) is
     begin
-        Console.setColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
+        Console.setColor (Colors.currentTheme.ui);
 
         Console.setCursor (x1, y1);
         Put (topLeft);
@@ -367,20 +300,18 @@ package body Gembrowse.UI is
     end box;
 
     ---------------------------------------------------------------------------
-    -- Detect whether the mouse is in a certain region.
-    ---------------------------------------------------------------------------
-    function regionHit (x1,y1,x2,y2 : Natural) return Boolean is
-    begin
-        return (mousex >= x1 and mousex <= x2 and mousey >= y1 and mousey <= y2);
-    end regionHit;
-
-    ---------------------------------------------------------------------------
     -- renderTitle
     -- Render URL and Tabs
     ---------------------------------------------------------------------------
-    procedure renderTitle is
+    procedure renderTitle (st : in out Gembrowse.UI.State.UIState) is
+
+        w : Natural := st.Window_Width;
+        h : Natural := st.Window_Height;
 
         procedure renderTabs is
+            -- id      : constant Gembrowse.UI.State.ID := Gembrowse.UI.State.Next_ID (st);
+            -- scope   : constant Gembrowse.UI.State.Scope_ID := st.Curr_Scope;
+
             -- moreTabs : Boolean := True;
             
             -- tracker for current draw position
@@ -398,30 +329,16 @@ package body Gembrowse.UI is
             begin
                 return (if l > r then r else l);
             end min;
+
         begin
 
             -- show prev tab button
-            Console.setCursor (1, 2);
-            Put ("◀");
-
-            -- Check for click in prev tab button
-            if regionHit (1,2,1,2) then
-                tooltip     := To_Unbounded_String ("Previous Tab");
-                showTooltip := True;
-
-                if click then
-                    showTooltip := False;
-                    activeTab := max (1, activeTab - 1);
-                    selectNone;
-                    click := False;
-                end if;
+            if Button (st, 1, 2, "◀", "Previous Tab") then
+                activeTab := max (1, activeTab - 1);
             end if;
 
             Console.setCursor (1,3);
             Put ("╔");
-
-            -- Console.setBGColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
-            -- Console.setColor (currentTheme.)
 
             -- @TODO figure out what to do when number of tabs exceeds the
             -- display. Some options are to restrict creation of new tabs once
@@ -492,11 +409,8 @@ package body Gembrowse.UI is
                 ty2 := 3;
 
                 -- Check for click on inactive tab
-                if click and regionHit (tx1, ty1, tx2, ty2) then
-                    showTooltip := False;
+                if st.Mouse_Down and then Region_Hit (st, tx1, ty1, tx2, ty2) then
                     activeTab := t;
-                    selectNone;
-                    click := False;
                 end if;
             end loop;
 
@@ -514,8 +428,12 @@ package body Gembrowse.UI is
 
             Console.setCursor (tx, 1);
             Put ("─");
-            Console.setCursor (tx, 2);
-            Put ("+");
+
+            if Button (st, tx, 2, "+", "New Tab (shortcut: Ctrl+t)",
+                Colors.currentTheme.ui, Colors.currentTheme.bg, 1, 1, 1, 1) then
+                newTab;
+            end if;
+
             Console.setCursor (tx, 3);
             Put ("═");
             tx := tx + 1;
@@ -528,21 +446,11 @@ package body Gembrowse.UI is
             Put ("╧");
             tx := tx + 1;
 
-            tx2 := tx - 1;
-            ty2 := 3;
-
-            -- Check for click in "New Tab (+)"
-            if regionHit (tx1, ty1, tx2, ty2) then
-                tooltip := To_Unbounded_String ("New Tab (shortcut: Ctrl+t)");
-                showTooltip := True;
-                if click then
-                    newTab;
-                    click := False;
-                end if;
-            end if;
+            -- tx2 := tx - 1;
+            -- ty2 := 3;
 
             -- draw remainder of horizontal border
-            for x in tx..w-1 loop
+            for x in tx .. w-1 loop
                 Console.setCursor (x, 1);
                 Put (" ");
                 Console.setCursor (x, 2);
@@ -553,35 +461,17 @@ package body Gembrowse.UI is
             Put ("╗");
 
             -- show next tab button
-            Console.setCursor (w, 2);
-            Put ("▶");
-
-            -- Check for click in next tab button
-            if regionHit (w,2,w,2) then
-                tooltip := To_Unbounded_String ("Next Tab");
-                showTooltip := True;
-                if click then
-                    activeTab := min (Natural (tabs.Length), activeTab + 1);
-                    selectNone;
-                    click := False;
-                end if;
+            if Button (st, w, 2, "▶", "Next Tab") then
+                activeTab := min (Natural (tabs.length), activeTab + 1);
             end if;
 
             -- show exit button
-            Console.setCursor (w, 1);
-            Put ("✖");
-
-            if regionHit (w,1,w,1) then
-                tooltip := To_Unbounded_String ("Exit program (shortcut: Ctrl+q)");
-                showTooltip := True;
-                if click then
-                    quit := True;
-                end if;
+            if Button (st, w, 1, "✖", "Exit Program (shortcut: Ctrl+q)") then
+                st.Done := True;
             end if;
-
         end renderTabs;
     begin
-        Console.setColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
+        Console.setColor (Colors.currentTheme.ui);
 
         renderTabs;
 
@@ -602,60 +492,21 @@ package body Gembrowse.UI is
 
         Put ("╣");
 
-        -- Render URL bar
-        Console.setCursor (3,4);
-
-        Console.setBGColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
-        Console.setColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-        Put ("⬅️");
+        -- Render navigation buttons
+        if Button (st, 3, 4, "⬅️", "Back (shortcut: backspace)", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
+            null;
+        end if;
         
-        -- check for hover/click on reload w/ tool-tip
-        if regionHit (2, 4, 4, 4) then
-            tooltip := To_Unbounded_String("Back (shortcut: backspace)");
-            showTooltip := True;
-            if click then
-                -- reload
-                null;
-            end if;
+        if Button (st, 6, 4, "➡️", "Forward", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
+            null;
         end if;
 
-        Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-        Put (" ");
-
-        Console.setBGColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
-        Console.setColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-        Put ("➡️");
-
-        -- check for hover/click on reload w/ tool-tip
-        if regionHit (5, 4, 7, 4) then
-            tooltip := To_Unbounded_String("Forward");
-            showTooltip := True;
-            if click then
-                -- reload
-                null;
-            end if;
+        if Button (st, 9, 4, "🔄", "Reload Page (shortcut: F5)", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
+            null;
         end if;
-
-        Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-        Console.setColor (currentTheme.fg.r, currentTheme.fg.g, currentTheme.fg.b);
-        Put (" ");
-
-        Console.setBGColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
-        Put ("🔄");
         
-        Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-        Console.setColor (currentTheme.fg.r, currentTheme.fg.g, currentTheme.fg.b);
+        Console.setBGColor (Colors.currentTheme.bg);
         Put (" ");
-
-        -- check for hover/click on reload w/ tool-tip
-        if regionHit (8, 4, 10, 4) then
-            tooltip := To_Unbounded_String("Reload Page (shortcut: F5)");
-            showTooltip := True;
-            if click then
-                -- reload
-                null;
-            end if;
-        end if;
 
         -- if updated cert (no TOFU) or bad TLS version
         -- Console.setBGColor (currentTheme.warning.r, currentTheme.warning.g, currentTheme.warning.b);
@@ -666,111 +517,37 @@ package body Gembrowse.UI is
         -- Put ("🔒");
         
         -- if CA-signed cert
-        Console.setBGColor (currentTheme.note.r, currentTheme.note.g, currentTheme.note.b);
-        Put ("🔐");
-
-        -- check for hover/click on reload w/ tool-tip
-        if regionHit (11, 4, 13, 4) then
-            tooltip := To_Unbounded_String("Self-signed certificate (Trusted on First-Use)");
-            showTooltip := True;
+        if Button (st, 12, 4, "🔐", "Self-signed certificate (Trusted on First-Use)",
+                   Colors.currentTheme.ui, Colors.currentTheme.note, 0, 2) then
+            null;                   
         end if;
 
-        Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-        Console.setColor (currentTheme.fg.r, currentTheme.fg.g, currentTheme.fg.b);
-        Put (" ");
-
-        Console.setBGColor (currentTheme.editorLine.r, currentTheme.editorLine.g, currentTheme.editorLine.b);
-        Console.setColor (currentTheme.note.r, currentTheme.note.g, currentTheme.note.b);
-
-        -- check for click in address bar.
-        -- single-click = highlight whole url
-        -- click again = put cursor on a single position.
-        -- click yet-again = highlight whole url
-        if click and regionHit (14, 4, w - 2, 4) then
-            appending  := False;
-            editingURL := True;
-
-            if cursorPos /= 0 then
-                -- highlight whole bar.
-                selectAll;
-            else
-                -- insert/append
-                cursorPos := (if mousex - 14 <= 1 then 1 else mousex - 14);
-                selectStart := cursorPos;
-                selectEnd := cursorPos;
-
-                if cursorPos > Length (tabs(activeTab).url) then
-                    cursorPos := Length (tabs(activeTab).url);
-                    appending := True;
-                end if;
-            end if;
-
-            click := False;
-        end if;
-
-        if editingURL then
-            for i in 1 .. Length (tabs(activeTab).url) loop
-                if i >= selectStart and i <= selectEnd then
-                    Console.setBGColor (currentTheme.bgSelected.r, currentTheme.bgSelected.g, currentTheme.bgSelected.b);
-                    Console.setColor (currentTheme.fgSelected.r, currentTheme.fgSelected.g, currentTheme.fgSelected.b);
-                    Put ("" & Element (tabs(activeTab).url, i));
-                else
-                    Console.setBGColor (currentTheme.editorLine.r, currentTheme.editorLine.g, currentTheme.editorLine.b);
-                    Console.setColor (currentTheme.fgSelected.r, currentTheme.fgSelected.g, currentTheme.fgSelected.b);
-                    Put ("" & Element (tabs(activeTab).url, i));
-                end if;
-            end loop;
-
-            -- if appending, need to highlight space after URL
-            if appending then
-                Console.setBGColor (currentTheme.bgSelected.r, currentTheme.bgSelected.g, currentTheme.bgSelected.b);
-                Console.setColor (currentTheme.fgSelected.r, currentTheme.fgSelected.g, currentTheme.fgSelected.b);
-                Put (" ");
-            end if;
-        else
-            Console.setBGColor (currentTheme.editorLine.r, currentTheme.editorLine.g, currentTheme.editorLine.b);
-            Console.setColor (currentTheme.fg.r, currentTheme.fg.g, currentTheme.fg.b);
-            Put (To_String (tabs(activeTab).url));
-        end if;
-
-        Console.setBGColor (currentTheme.editorLine.r, currentTheme.editorLine.g, currentTheme.editorLine.b);
-        Console.setColor (currentTheme.note.r, currentTheme.note.g, currentTheme.note.b);
-
-        -- fill rest of line so address bar looks nice
-        if appending then
-            for x in Length(tabs(activetab).url) .. w - 19 loop
-                Put (" ");
-            end loop;
-        else
-            for x in Length(tabs(activetab).url) .. w - 18 loop
-                Put (" ");
-            end loop;
+        if Gembrowse.UI.Text_Field.Text_Field (st, tabs(activeTab).url, 14, 4, w - 14, w - 14) then
+            loadPage (tabs(activeTab).url);
         end if;
 
         -- if Bookmarked, say so.
-        Console.setCursor (w-2, 4);
         if tabs(activetab).bookmarked then
-            Put ("🔖");
+            if Button (st, w-2, 4, "🔖", "Remove bookmark (shortcut: Ctrl+d)",
+                       Colors.currentTheme.ui, Colors.currentTheme.note, 0, 1) then
+                --@TODO remove bookmark
+                null;
+            end if;
         else
-            Put ("📑");
-        end if;
-
-        -- check hover/click on bookmark button
-        if regionHit (w-2, 4, w-1, 4) then
-            showTooltip := True;
-            if tabs(activetab).bookmarked then
-                tooltip := To_Unbounded_String ("Remove bookmark (shortcut: Ctrl+d)");
-            else
-                tooltip := To_Unbounded_String ("Add bookmark (shortcut: Ctrl+d)");
+            if Button (st, w-2, 4, "📑", "Add bookmark (shortcut: Ctrl+d)",
+                       Colors.currentTheme.ui, Colors.currentTheme.note, 0, 1) then
+                --@TODO add bookmark
+                null;
             end if;
         end if;
     end renderTitle;
 
     ---------------------------------------------------------------------------
     -- renderPage
-    -- Render current page contents
+    -- Render current page contents.
+    -- @TODO how do we 
     ---------------------------------------------------------------------------
-    procedure renderPage is
+    procedure renderPage (st : in out Gembrowse.UI.State.UIState) is
         preformatting : Boolean := False;
 
         type LineType is (Plain, Link, H1, H2, H3, Preformat, UnorderedList, Quote);
@@ -795,51 +572,51 @@ package body Gembrowse.UI is
                     Console.underlineOff;
                     -- Console.boldOff;
                     Console.italicsOff;
-                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-                    Console.setColor (currentTheme.fg.r, currentTheme.fg.g, currentTheme.fg.b);
+                    Console.setBGColor (Colors.currentTheme.bg);
+                    Console.setColor (Colors.currentTheme.fg);
                 when Link =>
                     --@TODO determine whether a link is visited or not
                     Console.underlineOn;
                     -- Console.boldOff;
                     Console.italicsOff;
-                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-                    Console.setColor (currentTheme.unvisitedLink.r, currentTheme.unvisitedLink.g, currentTheme.unvisitedLink.b);
+                    Console.setBGColor (Colors.currentTheme.bg);
+                    Console.setColor (Colors.currentTheme.unvisitedLink);
                 when H1 =>
                     Console.underlineOff;
                     -- Console.boldOn;
                     Console.italicsOff;
-                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-                    Console.setColor (currentTheme.h1.r, currentTheme.h1.g, currentTheme.h1.b);
+                    Console.setBGColor (Colors.currentTheme.bg);
+                    Console.setColor (Colors.currentTheme.h1);
                 when H2 =>
                     Console.underlineOff;
                     -- Console.boldOn;
                     Console.italicsOff;
-                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-                    Console.setColor (currentTheme.h2.r, currentTheme.h2.g, currentTheme.h2.b);
+                    Console.setBGColor (Colors.currentTheme.bg);
+                    Console.setColor (Colors.currentTheme.h2);
                 when H3 =>
                     Console.underlineOff;
                     -- Console.boldOff;
                     Console.italicsOff;
-                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-                    Console.setColor (currentTheme.h3.r, currentTheme.h3.g, currentTheme.h3.b);
+                    Console.setBGColor (Colors.currentTheme.bg);
+                    Console.setColor (Colors.currentTheme.h3);
                 when Preformat =>
                     Console.underlineOff;
                     -- Console.boldOff;
                     Console.italicsOff;
-                    Console.setBGColor (currentTheme.bgPreformat.r, currentTheme.bgPreformat.g, currentTheme.bgPreformat.b);
-                    Console.setColor (currentTheme.fgPreformat.r, currentTheme.fgPreformat.g, currentTheme.fgPreformat.b);
+                    Console.setBGColor (Colors.currentTheme.bgPreformat);
+                    Console.setColor (Colors.currentTheme.fgPreformat);
                 when UnorderedList =>
                     Console.underlineOff;
                     -- Console.boldOff;
                     Console.italicsOff;
-                    Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-                    Console.setColor (currentTheme.fgList.r, currentTheme.fgList.g, currentTheme.fgList.b);
+                    Console.setBGColor (Colors.currentTheme.bg);
+                    Console.setColor (Colors.currentTheme.fgList);
                 when Quote =>
                     Console.underlineOff;
                     -- Console.boldOff;
                     Console.italicsOn;
-                    Console.setBGColor (currentTheme.bgQuote.r, currentTheme.bgQuote.g, currentTheme.bgQuote.b);
-                    Console.setColor (currentTheme.fgQuote.r, currentTheme.fgQuote.g, currentTheme.fgQuote.b);
+                    Console.setBGColor (Colors.currentTheme.bgQuote);
+                    Console.setColor (Colors.currentTheme.fgQuote);
             end case;
         end setStyle;
 
@@ -967,15 +744,20 @@ package body Gembrowse.UI is
         vx : Natural := 3;
         vy : Natural := 7;
 
+        w : Natural := st.Window_Width;
+        h : Natural := st.Window_Height;
+
         -- index into page contents and char at that index
         i : Natural := 0;
         c : Character;
 
         -- type of line being rendered
         curLineType : LineType;
+
+        use Gembrowse.UI.Buttons;
     begin
-        Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-        Console.setColor (currentTheme.ui.r, currentTheme.ui.g, currentTheme.ui.b);
+        Console.setBGColor (Colors.currentTheme.bg);
+        Console.setColor (Colors.currentTheme.ui);
 
         -- left vert border
         for y in 6..h-3 loop
@@ -991,8 +773,11 @@ package body Gembrowse.UI is
 
         -- right scrollbar
         -- get position from current page
-        Console.setCursor (w-1, 6);
-        Put ("⬆");
+        if Button (st, w-1, 6, "⬆", "Scroll up (shortcut: up arrow)") then
+            null;
+        end if;
+        -- Console.setCursor (w-1, 6);
+        -- Put ("⬆");
 
         for y in 7..h-5 loop
             Console.setCursor (w-1, y);
@@ -1008,16 +793,25 @@ package body Gembrowse.UI is
         Put ("▓");
 
         -- horiz scrollbar
-        Console.setCursor (2, h-3);
-        Put ("⬅");
+        if Horizontal_Scrollbar (st => st,
+                                 x => 2,
+                                 y => h-3,
+                                 Width => w-4,
+                                 Min => 0,
+                                 Max => 10,
+                                 Val => scrollx) then
+            null;
+        end if;
+        -- Console.setCursor (2, h-3);
+        -- Put ("⬅");
 
-        for x in 2..w-4 loop
-            -- Console.setCursor (x, h-3);
-            Put ("░");
-        end loop;
+        -- for x in 2..w-4 loop
+        --     -- Console.setCursor (x, h-3);
+        --     Put ("░");
+        -- end loop;
 
-        Put ("➡");
-        Put ("█");
+        -- Put ("➡");
+        -- Put ("█");
 
         Console.setCursor (vx, vy);
         
@@ -1059,26 +853,25 @@ package body Gembrowse.UI is
         end loop;
 
         setStyle (Plain);
-        -- Console.underlineOff;
-        -- Console.boldOff;
-        -- Console.italicsOff;
     end renderPage;
 
     ---------------------------------------------------------------------------
-    -- renderFooter
+    -- footer
     -- Render footer and status bar
     ---------------------------------------------------------------------------
-    procedure renderFooter is
+    procedure footer (st : in out Gembrowse.UI.State.UIState) is
+        w : Natural := st.Window_Width;
+        h : Natural := st.Window_Height;
     begin
         box (1, h-2, w, h, "╠", "╣", "╚", "╝");
 
         Console.setCursor (2, h-1);
-        Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
-        Console.setColor (currentTheme.note.r, currentTheme.note.g, currentTheme.note.b);
-        -- Put (To_String (status) & To_String (escSequence));
-        if showTooltip then
-            Put (To_String (tooltip));
-            for i in Length (tooltip) .. w - 4 loop
+        Console.setBGColor (Colors.currentTheme.bg);
+        Console.setColor (Colors.currentTheme.note);
+        if Length (st.tooltip) > 0 then
+            Put (To_String (st.tooltip));
+
+            for i in Length (st.tooltip) .. w - 4 loop
                 Put (" ");
             end loop;
         else
@@ -1088,7 +881,7 @@ package body Gembrowse.UI is
             end loop;
         end if;
 
-    end renderFooter;
+    end footer;
 
     ---------------------------------------------------------------------------
     -- Signal handler for SIGWINCH - when the window is resized we need to
@@ -1098,376 +891,12 @@ package body Gembrowse.UI is
         procedure handle is
         begin
             Console.disableMouse;
-            Console.termSize (w, h);
+            Console.termSize (GUI_State.Window_Width, GUI_State.Window_Height);
             Console.enableMouse;
-            Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+            Console.setBGColor (Colors.currentTheme.bg);
             Console.clear;
         end handle;
     end Sigwinch_Handler;
-
-    ---------------------------------------------------------------------------
-    -- handleInput
-    --
-    -- Read stdin for VT100 control codes, handle appropriately. This just
-    -- reads input and handles it immediately instead of queuing up input
-    -- events for other components to handle. This is more straightforward, but
-    -- less re-usable. May consider the input queue if breaking this out into
-    -- a separate TUI library at some point.
-    ---------------------------------------------------------------------------
-    procedure handleInput is
-        chr      : Character;
-
-        use Interfaces;
-
-        -----------------------------------------------------------------------
-        -- backspace
-        -- Handle backspace depending on whether we're editing the address bar
-        -- or not.
-        -----------------------------------------------------------------------
-        procedure backspace is
-        begin
-            tooltip := To_Unbounded_String ("BS");
-            if editingURL then
-                if Length(tabs(activeTab).url) = 0 then
-                    return;
-                elsif cursorPos > Length(tabs(activeTab).url) then
-                    Delete (tabs(activeTab).url, Length(tabs(activeTab).url), Length(tabs(activeTab).url));
-                    cursorLeft;
-                elsif cursorPos = 0 and selectStart /= 0 and selectEnd /= 0 then
-                    Delete (tabs(activeTab).url, selectStart, selectEnd);
-                end if;
-            else
-                -- @TODO go back in history
-                null;
-            end if;
-        end backspace;
-
-        -----------------------------------------------------------------------
-        -- delete
-        -- Handle press of the delete key
-        -----------------------------------------------------------------------
-        procedure delete is
-        begin
-            tooltip := To_Unbounded_String ("DEL");
-            null;
-            --TODO handle delete
-        end delete;
-
-        -----------------------------------------------------------------------
-        -- enter
-        -- Handle Enter keypress.
-        -----------------------------------------------------------------------
-        procedure enter is
-        begin
-            if editingURL then
-                loadPage (tabs(activeTab).url);
-            end if;
-        end enter;
-
-        -----------------------------------------------------------------------
-        -- printable
-        -- Handle normal printable character keypresses
-        -----------------------------------------------------------------------
-        procedure printable (c : Character) is
-        begin
-            if editingURL then
-                -- printable character, add it to our text
-                if cursorPos > Length(tabs(activeTab).url) then
-                    -- cursor at end
-                    Append (tabs(activeTab).url, c);
-                    cursorPos := cursorPos + 1;
-                    appending := True;
-                elsif cursorPos = 1 then
-                    -- cursor at beginning
-                    Insert (tabs(activeTab).url, 1, "" & c);
-                elsif cursorPos /= 0 and selectStart = 0 and selectEnd = 0 then
-                    -- cursor in middle of word
-                    Insert (tabs(activeTab).url, cursorPos, "" & c);
-                    cursorPos := cursorPos + 1;
-                elsif cursorPos = 0 and selectStart /= 0 and selectEnd /= 0 then
-                    -- whole word selected
-                    -- @TODO right now we just allow selecting entire address, not a sub-string,
-                    -- would like to allow dragging or shift+arrow to enable selective editing.
-                    Delete (tabs(activeTab).url, selectStart, selectEnd);
-                    Append (tabs(activeTab).url, c);
-                    cursorPos := Length(tabs(activeTab).url) + 1;
-                    selectStart := 0;
-                    selectEnd := 0;
-                    appending := True;
-                else
-                    -- not sure why we'd get here.
-                    null;
-                end if;
-            end if;
-        end printable;
-
-        -----------------------------------------------------------------------
-        -- isMouseSequence
-        -- If escSequence is potentially a mouse input, return True. Otherwise,
-        -- return False.
-        -----------------------------------------------------------------------
-        function isMouseSequence (escSequence : Unbounded_String) return Boolean is
-        begin
-            return (Length (escSequence) >= 8 and then 
-                    (Element(escSequence, 1) = '[' and 
-                     Element(escSequence, 2) = '<' and 
-                     (Element(escSequence, Length(escSequence)) = 'm' or
-                      Element(escSequence, Length(escSequence)) = 'M')));
-        end isMouseSequence;
-
-        -----------------------------------------------------------------------
-        -- handleMouse
-        -- Given an escape sequence representing a mouse input, handle it
-        -- appropriately.
-        -----------------------------------------------------------------------
-        procedure handleMouse (escSequence : Unbounded_String) is
-            data  : String  := To_String (escSequence);
-            lt    : Natural := Index (data, "<", data'First);
-            semi1 : Natural := Index (data, ";", lt);
-            semi2 : Natural := Index (data, ";", semi1+1);
-
-            buttonStr : String := data(lt+1..semi1-1);
-            posxStr   : String := data(semi1+1..semi2-1);
-            posyStr   : String := data(semi2+1..data'Last-1);
-
-            button, posx, posy : Natural;
-
-            mtype  : Character := Element (escSequence, Length (escSequence));
-
-            badSeq : Boolean := False;
-
-            MOUSE_MOVE  : constant := 35;
-            LEFT_CLICK  : constant := 0;
-            RIGHT_CLICK : constant := 1;
-            WHEEL_UP    : constant := 4;
-            WHEEL_DN    : constant := 5;
-        begin
-            -- Quick sanity check here, if we get a goofed up escSequence, QC our values before proceeding.
-            for c of buttonStr loop
-                if c not in '0'..'9' then
-                    badSeq := True;
-                    return;
-                end if;
-            end loop;
-
-            for c of posxStr loop
-                if c not in '0'..'9' then
-                    badSeq := True;
-                    return;
-                end if;
-            end loop;
-            
-            for c of posyStr loop
-                if c not in '0'..'9' then
-                    badSeq := True;
-                    return;
-                end if;
-            end loop;
-            
-            button := Natural'Value (buttonStr);
-            posx   := Natural'Value (posxStr);
-            posy   := Natural'Value (posyStr);
-
-            if button = MOUSE_MOVE then
-                mousex := posx;
-                mousey := posy;
-            elsif button = LEFT_CLICK then
-                if mtype = 'M' then
-                    click := True;
-                elsif mtype = 'm' then
-                    click := False;
-                end if;
-            elsif button = WHEEL_UP then
-                scrollUp (4);
-            elsif button = WHEEL_DN then
-                scrollDown (4);
-            end if;
-        end handleMouse;
-
-        -----------------------------------------------------------------------
-        -- escapeSequence
-        -- If we got an escape sequence, process it here.
-        -----------------------------------------------------------------------
-        procedure escapeSequence (escSequence : Unbounded_String) is
-            F1      : constant String := "OP";
-            F2      : constant String := "OQ";
-            F3      : constant String := "OR";
-            F4      : constant String := "OS";
-            F5      : constant String := "[15~";
-            F6      : constant String := "[17~";
-            F7      : constant String := "[18~";
-            F8      : constant String := "[19~";
-            F9      : constant String := "[20~";
-            INS     : constant String := "[2~";
-            HOME    : constant String := "[H";
-            KEY_END : constant String := "[F";
-            PGUP    : constant String := "[5~";
-            PGDN    : constant String := "[6~";
-            DEL     : constant String := "[3~";
-            UP      : constant String := "[A";
-            DOWN    : constant String := "[B";
-            RIGHT   : constant String := "[C";
-            LEFT    : constant String := "[D";
-        begin
-            if To_String (escSequence) = F1 then
-                null;
-            elsif To_String (escSequence) = F2 then
-                null;
-            elsif To_String (escSequence) = F3 then
-                null;
-            elsif To_String (escSequence) = F4 then
-                null;
-            elsif To_String (escSequence) = F5 then
-                --loadPage (tabs(activeTab).url);
-                null;
-            elsif To_String (escSequence) = F6 then
-                null;
-            elsif To_String (escSequence) = F7 then
-                null;
-            elsif To_String (escSequence) = F8 then
-                null;
-            elsif To_String (escSequence) = F9 then
-                null;
-            elsif To_String (escSequence) = INS then
-                null;
-            elsif To_String (escSequence) = HOME then
-                null;   -- @TODO scroll up to top
-            elsif To_String (escSequence) = PGUP then
-                if not editingURL then
-                    scrollUp (20);
-                end if;
-            elsif To_String (escSequence) = PGDN then
-                if not editingURL then
-                    scrollDown (20);
-                end if;
-            elsif To_String (escSequence) = KEY_END then
-                null;
-            elsif To_String (escSequence) = DEL then
-                delete;
-            elsif To_String (escSequence) = UP then
-                if not editingURL then
-                    scrollUp;
-                end if;
-            elsif To_String (escSequence) = DOWN then
-                if not editingURL then
-                    scrollDown;
-                end if;
-            elsif To_String (escSequence) = LEFT then
-                if editingURL then
-                    cursorLeft;
-                else
-                    scrollLeft;
-                end if;
-            elsif To_String (escSequence) = RIGHT then
-                if editingURL then
-                    cursorRight;
-                else
-                    scrollRight;
-                end if;
-            elsif isMouseSequence (escSequence) then
-                handleMouse (escSequence);
-            else
-                null;   -- @TODO probably other useful sequences to handle.
-            end if;
-        end escapeSequence;
-
-        -----------------------------------------------------------------------
-        -- escape
-        -- Get escape sequences. These can be responses to terminal queries,
-        -- or special keypresses, or mouse inputs.
-        -----------------------------------------------------------------------
-        procedure escape is
-            escSequence : Unbounded_String;
-        begin
-            -- see if more input is waiting (multi char escape sequence)
-            loop
-                chr := Console.getch;
-                exit when chr = ASCII.NUL;
-                Append (escSequence, chr);
-            end loop;
-
-            -- if we hit ESC by itself, we'll have an empty escSequence
-            if Length (escSequence) = 0 then
-                if editingURL then
-                    selectNone;
-                end if;
-
-                return;
-            end if;
-
-            escapeSequence (escSequence);
-        end escape;
-
-        -----------------------------------------------------------------------
-        -- control
-        -- Handle control characters
-        -----------------------------------------------------------------------
-        procedure control (c : Character) is
-            pos : Natural;
-
-            CTRL_D   : constant := 4;
-            CTRL_F   : constant := 6;
-            CTRL_H   : constant := 8;
-            CTRL_J   : constant := 10;
-            CTRL_L   : constant := 12;
-            CR       : constant := 13;
-            CTRL_Q   : constant := 17;
-            CTRL_S   : constant := 19;
-            CTRL_T   : constant := 20;
-            CTRL_W   : constant := 23;
-            CTRL_B   : constant := 29;
-            DEL      : constant := 127;
-        begin
-            -- CTRL + something
-            pos := Character'Pos (c);
-            
-            -- copied from Chrome for most part
-            case pos is
-                when CTRL_D => null;        --@TODO save bookmark
-                when CTRL_F =>
-                    --@TODO search function
-                    -- probably want to change address bar to a special
-                    -- find-in-page mode where editingURL is true, but "find"
-                    -- is also true
-                    null;
-                when CTRL_H | DEL =>
-                    backspace;
-                when CTRL_J | CR =>
-                    enter;
-                when CTRL_L =>
-                    selectAll;
-                when CTRL_Q => quit := True;
-                when CTRL_S => null;        --@TODO save document to disk
-                when CTRL_T => newTab;
-                when CTRL_W => closeTab (activeTab);
-                when CTRL_B => null;        --@TODO show bookmarks
-                when others =>
-                    tooltip := To_Unbounded_String ("key: " & pos'Image);
-            end case;
-        end control;
-    begin
-        -- returns NUL if no input available
-        chr := Console.getch;
-
-        case chr is
-            when ASCII.NUL =>
-                return;
-            when ASCII.SOH..ASCII.SUB | ASCII.DEL =>
-                control (chr);
-            when ' '..'~' =>
-                -- normal printable char
-                printable (chr);
-            when ASCII.ESC =>
-                escape;
-            when others =>
-                null;
-                -- declare
-                --     pos : Natural := Character'Pos (chr);
-                -- begin
-                --     tooltip := To_Unbounded_String ("asdf: " & pos'Image);
-                -- end;
-        end case;
-    end handleInput;
 
     ---------------------------------------------------------------------------
     -- renderCursor
@@ -1475,12 +904,85 @@ package body Gembrowse.UI is
     -- the regular mouse pointer works fine. This might be nice if not in an
     -- xterm.
     ---------------------------------------------------------------------------
-    procedure renderCursor is
+    procedure renderCursor (st : Gembrowse.UI.State.UIState) is
     begin
-        Console.setCursor (mousex, mousey);
-        Console.setColor (currentTheme.fgSelected.r, currentTheme.fgSelected.g, currentTheme.fgSelected.b);
+        Console.setCursor (st.Mouse_x, st.Mouse_y);
+        Console.setColor (Colors.currentTheme.fgSelected);
         Put ("᛭");
     end renderCursor;
+
+    ---------------------------------------------------------------------------
+    -- start a rendering iteration
+    ---------------------------------------------------------------------------
+    procedure startRender (st : in out Gembrowse.UI.State.UIState) is
+    begin
+        st.Hot_Item := Gembrowse.UI.State.NO_ITEM;
+        st.Last_IDs := (others => Gembrowse.UI.State.NO_ITEM);
+
+        Gembrowse.UI.State.Enter_Scope (st);
+    end startRender;
+
+    ---------------------------------------------------------------------------
+    -- finish a rendering iteration
+    ---------------------------------------------------------------------------
+    procedure finishRender (st : in out Gembrowse.UI.State.UIState) is
+        use Ada.Real_Time;
+        use Gembrowse.UI.State;
+        Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+    begin
+        -- Handle timing for cursor blink
+        if Now > st.Last_Blink + Milliseconds (400) then
+            st.Blink_On := not (st.Blink_On);
+            st.Last_Blink := Now;
+        end if;
+
+        -- If mouse isn't down, clear the active item.
+        -- If mouse is clicked with no widget active, mark no active item (-1) so we
+        -- don't "click" on something if we release the button on top of another
+        -- widget.
+        if st.Mouse_Down = False then
+            --Ada.Text_IO.Put_Line("Setting active to NO_ITEM");
+            st.Active_Item := NO_ITEM;
+        else
+            if st.Active_Item = NO_ITEM then
+                --Ada.Text_IO.Put_Line("Setting active to INVALID_ITEM");
+                st.Active_Item := INVALID_ITEM;
+            end if;
+        end if;
+
+        st.Double_Click := False;
+
+        -- If we finished a round and the heartbeat wasn't updated because a
+        -- widget wasn't drawn, then remove the focus. If we don't do this, the
+        -- hidden widget will keep the focus forever.
+        if st.Kbd_Heartbeat = False then
+            st.Kbd_Item  := NO_ITEM;
+            st.Kbd_Scope := NO_SCOPE;
+        end if;
+
+        -- Reset heartbeat, pressed key, button presses and any text inputs that took place
+        st.Kbd_Heartbeat := False;
+        st.Kbd_Pressed   := Gembrowse.UI.Keys.KEY_NONE;
+        st.Kbd_Text := Ada.Strings.Unbounded.Null_Unbounded_String;
+        st.Mouse_Buttons := (others => False);
+
+        -- Reset tooltip if necessary. We don't want to switch the tooltip on and
+        -- off if the hot item is going to remain.
+        -- If we leave here with no hot item (meaning that the
+        -- mouse left a widget if it was there previously), then we'll
+        -- turn the tooltip off. If it remains hot, we'll leave it
+        -- to whatever it was set to by the widget that may have set it last.
+        if st.Hot_Item = NO_ITEM then
+            st.Tooltip := Null_Unbounded_String;
+        end if;
+
+        Gembrowse.UI.State.Exit_Scope (st);
+
+        -- when we finish, we should be back to the initial scope
+        if st.Curr_Scope /= NO_SCOPE then
+            raise Gembrowse.UI.State.Invalid_Scope_Exception with "Called finishRender with unclosed scopes";
+        end if;
+    end finishRender;
 
     ---------------------------------------------------------------------------
     -- renderLoop
@@ -1491,7 +993,6 @@ package body Gembrowse.UI is
         nextPeriod : Ada.Real_Time.Time;
 
         -- oldw, oldh : Natural;
-
         use Ada.Real_Time;
     begin
         newTab;
@@ -1501,31 +1002,30 @@ package body Gembrowse.UI is
         Console.enableMouse;
 
         Console.setTitle ("Gembrowse 💎");
-        Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+        Console.setBGColor (Colors.currentTheme.bg);
         Console.clear;
 
-        Console.termSize (w, h);
+        Console.termSize (GUI_State.Window_Width, GUI_State.Window_Height);
 
         loop
-            -- showTooltip := False;
-
             --@TODO may need to adjust this or the input handler, it seems
             -- sometimes we miss mouse clicks
             startTime := Ada.Real_Time.Clock;
             nextPeriod := startTime + Ada.Real_Time.Milliseconds (33);     -- 30 fps
 
-            Console.setBGColor (currentTheme.bg.r, currentTheme.bg.g, currentTheme.bg.b);
+            Console.setBGColor (Colors.currentTheme.bg);
 
-            renderTitle;
-            renderPage;
-            renderFooter;
-            -- renderCursor;
+            startRender (GUI_State);
+            renderTitle (GUI_State);
+            renderPage (GUI_State);
+            footer (GUI_State);
+            finishRender (GUI_State);
 
-            handleInput;
+            Handle_Inputs (GUI_State);
 
             delay until nextPeriod;
 
-            exit when quit;
+            exit when GUI_State.Done;
         end loop;
 
         Console.disableMouse;

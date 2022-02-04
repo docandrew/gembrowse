@@ -7,6 +7,8 @@
 -------------------------------------------------------------------------------
 with Interfaces.C;
 
+with Colors;
+
 package Console is
 
     function getch return Character;
@@ -18,7 +20,9 @@ package Console is
     procedure normalMode;
 
     procedure setColor (r, g, b : Natural);
+    procedure setColor (c : Colors.ThemeColor);
     procedure setBGColor (r, g, b: Natural);
+    procedure setBGColor (c : Colors.ThemeColor);
     procedure resetColor;
 
     procedure underlineOn;
