@@ -45,6 +45,7 @@ package Console is
     procedure termSize (width, height : out Natural);
     
     procedure clear;
+    procedure eraseLine;
 
     procedure setTitle (s : String);
 

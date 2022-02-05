@@ -122,7 +122,7 @@ package body Gembrowse.Net is
         -- receive header
         readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
 
-        Put_Line ("Received" & readLen'Image & " bytes");
+        -- Put_Line ("Received" & readLen'Image & " bytes");
 
         -- if readLen < 0 then
         --     Console.Error ("Fatal: tls_read (" & Value (tls_error (tlsContext)) & ")");
@@ -135,20 +135,22 @@ package body Gembrowse.Net is
         -- receive body
         readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
         
-        Put_Line ("Received" & readLen'Image & " bytes");
+        -- Put_Line ("Received" & readLen'Image & " bytes");
 
         -- if readLen < 0 then
         --     Console.Error ("Fatal: tls_read (" & Value (tls_error (tlsContext)) & ")");
         -- end if;
+        page := Null_Unbounded_String;
 
         for i in 1..Integer(readLen) loop
-            Put (recvBuf(i));
+            -- Put (recvBuf(i));
+            Append (page, recvBuf(i));
         end loop;
 
         -- cleanup
 
         if tls_close (tlsContext) /= 0 then
-            Console.Error ("Fatal: tls_close (" & Value (tls_error (tlsContext)) & ")");
+            -- Console.Error ("Fatal: tls_close (" & Value (tls_error (tlsContext)) & ")");
             return False;
         end if;
 

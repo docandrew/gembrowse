@@ -200,10 +200,13 @@ package body Console is
 
     procedure clear is
     begin
-        Put (ASCII.ESC & "[");
-        Put (2, Width => 0);
-        Put ("J");
+        Put (ASCII.ESC & "[2J");
     end clear;
+
+    procedure eraseLine is
+    begin
+        Put (ASCII.ESC & "[2K");
+    end eraseLine;
 
     procedure setCursor (x, y : Natural) is
     begin

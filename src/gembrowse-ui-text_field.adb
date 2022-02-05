@@ -328,7 +328,8 @@ package body Gembrowse.UI.Text_Field is
                          x               : Natural;
                          y               : Natural;
                          Display_Length  : Natural := 20;
-                         Max_Length      : Natural := 20) return Boolean
+                         Max_Length      : Natural := 20;
+                         Force_Select    : Boolean := False) return Boolean
     is
         package UBS renames Ada.Strings.Unbounded;
         use Gembrowse.UI.State;
@@ -395,9 +396,20 @@ package body Gembrowse.UI.Text_Field is
             st.Selection_End    := st.Selection_Start;
         end if;
 
-        -- Render background first, paint over it later.
+        -- If Force_Select is on, then steal the focus and select the whole field.
+        if Force_Select then
+            st.Kbd_Item := id;
+            st.Kbd_Scope := Scope;
+
+            st.Cursor_Pos := UBS.Length(Text) + 1;
+            st.Selection_Start := 1;
+            st.Selection_End := st.Cursor_Pos;
+        end if;
+
         -- if we have keyboard focus, show it and update heartbeat
         if st.Kbd_Item = id and st.Kbd_Scope = Scope then
+            -- Render background first, paint over it later.
+            -- @TODO probably don't want to do this. It gives ugly artifacts.
             Console.setCursor (x, y);
             Console.setBGColor (Colors.currentTheme.editorLine);
             for i in 1 .. Display_Length loop
@@ -411,6 +423,7 @@ package body Gembrowse.UI.Text_Field is
             for i in 1 .. Display_Length loop
                 Put (" ");
             end loop;
+            null;
         end if;
 
         -- If we are still active, then update cursor based on mouse position
@@ -569,6 +582,14 @@ package body Gembrowse.UI.Text_Field is
                         Console.underlineOff;
                     end if;
                 end if;
+
+                -- draw rest of text field empty
+                -- @TODO either do this or paint the background ahead of time.
+                -- Console.setBGColor (Colors.currentTheme.editorLine);
+
+                -- for c in UBS.Length (Text) .. Display_Length - Text_Draw_Offset - 4 loop
+                --     Put (" ");
+                -- end loop;
 
                 -- Expand selection if double clicked.
                 if st.Double_Click and UBS.Length (Text) > 0 then

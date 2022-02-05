@@ -22,15 +22,9 @@ package body Gembrowse.UI.Input is
     end Region_Hit;
 
     ---------------------------------------------------------------------------
-    -- Handle_Inputs
-    --
-    -- Read stdin for VT100 control codes, handle appropriately. This just
-    -- reads input and handles it immediately instead of queuing up input
-    -- events for other components to handle. This is more straightforward, but
-    -- less re-usable. May consider the input queue if breaking this out into
-    -- a separate TUI library at some point.
+    -- Get_Inputs
     ---------------------------------------------------------------------------
-    procedure Handle_Inputs (st : in out Gembrowse.UI.State.UIState) is
+    procedure Get_Inputs (st : in out Gembrowse.UI.State.UIState) is
         chr : Character;
 
         use Gembrowse.UI.Keys;
@@ -175,6 +169,8 @@ package body Gembrowse.UI.Input is
             RIGHT   : constant String := "[C";
             LEFT    : constant String := "[D";
 
+            SHIFT_TAB : constant String := "[Z";
+
             SHIFT_HOME : constant String := "[1;2H";
             SHIFT_END  : constant String := "[1;2F";
 
@@ -221,10 +217,13 @@ package body Gembrowse.UI.Input is
                 st.Kbd_Pressed := KEY_UP;
             elsif To_String (escSequence) = DOWN then
                 st.Kbd_Pressed := KEY_DOWN;
-            elsif To_String (escSequence) = LEFT then
-                st.Kbd_Pressed := KEY_LEFT;
             elsif To_String (escSequence) = RIGHT then
                 st.Kbd_Pressed := KEY_RIGHT;
+            elsif To_String (escSequence) = LEFT then
+                st.Kbd_Pressed := KEY_LEFT;
+            elsif To_String (escSequence) = SHIFT_TAB then
+                st.Kbd_Pressed := KEY_TAB;
+                st.Kbd_Modifier.Shift := True;
             elsif To_String (escSequence) = SHIFT_HOME then
                 st.Kbd_Pressed := KEY_HOME;
                 st.Kbd_Modifier.SHIFT := True;
@@ -301,6 +300,7 @@ package body Gembrowse.UI.Input is
             CTRL_D   : constant := 4;
             CTRL_F   : constant := 6;
             CTRL_H   : constant := 8;
+            TAB      : constant := 9;
             CTRL_J   : constant := 10;
             CTRL_L   : constant := 12;
             CR       : constant := 13;
@@ -327,6 +327,8 @@ package body Gembrowse.UI.Input is
                     st.Kbd_Modifier.CTRL := True;
                 when CTRL_H | DEL =>
                     st.Kbd_Pressed := KEY_BACKSPACE;
+                when TAB =>
+                    st.Kbd_Pressed := KEY_TAB;
                 when CTRL_J | CR =>
                     st.Kbd_Pressed := KEY_ENTER;
                 when CTRL_L =>
@@ -377,6 +379,6 @@ package body Gembrowse.UI.Input is
                 --     tooltip := To_Unbounded_String ("asdf: " & pos'Image);
                 -- end;
         end case;
-    end Handle_Inputs;
+    end Get_Inputs;
 
 end Gembrowse.UI.Input;

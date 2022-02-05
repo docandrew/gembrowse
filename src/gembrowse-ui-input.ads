@@ -12,12 +12,12 @@ package Gembrowse.UI.Input is
     function Region_Hit (st: in out Gembrowse.UI.State.UIState; x1,y1,x2,y2 : Natural) return Boolean;
     
     ---------------------------------------------------------------------------
-    -- Handle_Inputs
+    -- Get_Inputs
     --
     -- Reads stdin for either keypresses or ANSI escape codes representing
     -- other inputs, such as mouse movement or clicks, and update the UI State
     -- with those inputs.
     ---------------------------------------------------------------------------
-    procedure Handle_Inputs (st : in out Gembrowse.UI.State.UIState);
+    procedure Get_Inputs (st : in out Gembrowse.UI.State.UIState);
 
 end Gembrowse.UI.Input;

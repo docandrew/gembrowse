@@ -5,6 +5,7 @@
 --
 -- @TODO - make the UI elements a little fancier with being "Hot" vs "Active"
 -- and highlight accordingly.
+-- @TODO - figure out how to divide keyboard focus between address bar and page, etc.
 -- @TODO - arrow keys for moving between tabs
 -- @TODO - viewport / scrollbars work
 --
@@ -23,6 +24,7 @@ with Interfaces;
 with Colors;
 with Console;
 
+with Gembrowse.Net; use Gembrowse.Net;
 with Gembrowse.UI.Buttons; use Gembrowse.UI.Buttons;
 with Gembrowse.UI.Input; use Gembrowse.UI.Input;
 with Gembrowse.UI.Keys;
@@ -33,32 +35,17 @@ with Gembrowse.UI.Text_Field; use Gembrowse.UI.Text_Field;
 
 package body Gembrowse.UI is
 
-    -- mousex, mousey : Natural := 1;
-    -- click       : Boolean := False;
-    activeTab   : Natural := 1;
+    ADDRESS_BAR_ROW : constant := 4;
+    PAGE_START      : constant := 6;
 
-    -- quit : Boolean := False;
+    activeTab   : Natural := 1;
 
     -- Length of time to render a frame.
     frameTime   : Ada.Real_Time.Time_Span := Ada.Real_Time.Milliseconds (1);
 
     GUI_State : Gembrowse.UI.State.UIState;
 
-    -- Address bar selection
-    -- editingURL  : Boolean := False;
-    -- cursorPos   : Natural := 0;
-    -- selectStart : Natural;
-    -- selectEnd   : Natural;
-    -- appending   : Boolean := False;
-
-    -- addressBarState : Gembrowse.UI.AddressBar.TextFieldState;
-
-    -- showTooltip : Boolean := True;
-    -- tooltip : Unbounded_String := To_Unbounded_String ("Welcome to Gembrowse - Copyright 2022 Jon Andrew");
-
-    -- w,h : Natural := 0;
-
-    -- debugMode : Boolean := True;
+    highlightAddressBar : Boolean := False;
 
     ---------------------------------------------------------------------------
     -- PageState
@@ -78,97 +65,28 @@ package body Gembrowse.UI is
     package PageStates is new Ada.Containers.Vectors (Index_Type => Positive, Element_Type => PageState);
     tabs : PageStates.Vector;
 
+    -- For testing. The actual scrollbar limits will be baked into the PageState.
     scrollx : Natural := 0;
+    scrolly : Natural := 0;
 
-    ---------------------------------------------------------------------------
-    -- select entire address bar
-    ---------------------------------------------------------------------------
-    -- procedure selectAll is
-    -- begin
-    --     editingURL := True;
-    --     cursorPos := 0;
-    --     selectStart := 1;
-    --     selectEnd := Length(tabs(activeTab).url);
-    -- end selectAll;
-
-    ---------------------------------------------------------------------------
-    -- deselect entire address bar
-    ---------------------------------------------------------------------------
-    -- procedure selectNone is
-    -- begin
-    --     editingURL := False;
-    --     cursorPos := 0;
-    --     selectStart := 0;
-    --     selectEnd := 0;
-    -- end selectNone;
-
-    ---------------------------------------------------------------------------
-    -- cursorLeft
-    -- If editing the address bar, move the cursor one place to the left
-    ---------------------------------------------------------------------------
-    -- procedure cursorLeft is
-    -- begin
-    --     if cursorPos = 1 then
-    --         return;
-    --     elsif cursorPos = 0 then
-    --         -- selection
-    --         cursorPos := selectStart;
-    --         selectEnd := cursorPos;
-    --         tooltip := To_Unbounded_String ("left A");
-    --     else
-    --         cursorPos := cursorPos - 1;
-    --         selectStart := cursorPos;
-    --         selectEnd := cursorPos;
-    --         tooltip := To_Unbounded_String ("left B");
-    --     end if;
-    -- end cursorLeft;
-
-    ---------------------------------------------------------------------------
-    -- cursorRight
-    -- If editing the address bar, move the cursor one place to the right
-    ---------------------------------------------------------------------------
-    -- procedure cursorRight is
-    -- begin
-    --     if cursorPos > Length(tabs(activeTab).url) + 1 then
-    --         return;
-    --     elsif cursorPos = 0 then
-    --         -- selection
-    --         cursorPos := selectEnd;
-    --         selectStart := cursorPos;
-    --         selectEnd := cursorPos;
-    --         tooltip := To_Unbounded_String ("right A");
-    --     else
-    --         cursorPos := cursorPos + 1;
-    --         selectStart := cursorPos;
-    --         selectEnd := cursorPos;
-    --         tooltip := To_Unbounded_String ("right B");
-    --     end if;
-    -- end cursorRight;
-
-    ---------------------------------------------------------------------------
-    -- loadPage
-    -- Given an address, load that page into the active tab.
-    -- @TODO push previous page to history
-    -- @TODO determine bookmark status
-    ---------------------------------------------------------------------------
-    procedure loadPage (url : Unbounded_String) is
-    begin
-        GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (url));
-    end loadPage;
+    -- fwd declaration
+    procedure clearPage (st : in out Gembrowse.UI.State.UIState);
+    procedure switchTab (st : in out Gembrowse.UI.State.UIState; tabNum : Positive);
 
     ---------------------------------------------------------------------------
     -- newTab
     ---------------------------------------------------------------------------
-    procedure newTab is
+    procedure newTab (st : in out Gembrowse.UI.State.UIState) is
         newTabContents : String := 
             "# Gembrowse - Gemini Browser by Jon Andrew" & ASCII.LF &
             "" & ASCII.LF &
-            "This is a normal line" & ASCII.LF &
+            "Press Ctrl+q to exit" & ASCII.LF &
             ASCII.LF &
             "##  Features" & ASCII.LF &
             "" & ASCII.LF &
             "* LibreSSL" & ASCII.LF &
             "* Written in Ada" & ASCII.LF &
+            "* Mouse and Keyboard Friendly" & ASCII.LF &
             ASCII.LF &
             "###    Links" & ASCII.LF &
             ASCII.LF &
@@ -184,17 +102,37 @@ package body Gembrowse.UI is
                       status        => To_Unbounded_String ("✔️ Loaded 843b in .013s "),
                       others        => <>));
         
-        activeTab := tabs.Last_Index;
+        -- @TODO highlight whole address bar without having to click,
+        highlightAddressBar := True;
 
-        -- highlight whole address bar without having to click
+        switchTab (st, tabs.Last_Index);
+
     end newTab;
+
+    ---------------------------------------------------------------------------
+    -- switchTab
+    ---------------------------------------------------------------------------
+    procedure switchTab (st : in out Gembrowse.UI.State.UIState; tabNum : Positive) is
+    begin
+        clearPage (st);
+        activeTab := tabNum;
+    end switchTab;
+
+    ---------------------------------------------------------------------------
+    -- helpTab
+    -- Would like to have a page showing shortcuts, etc.
+    ---------------------------------------------------------------------------
+    procedure helpTab is
+    begin
+        null;
+    end helpTab;
 
     ---------------------------------------------------------------------------
     -- closeTab
     -- Note that we always have to have a tab open, so if this closes the last
     -- tab, go ahead and create a new one.
     ---------------------------------------------------------------------------
-    procedure closeTab (num : Positive) is
+    procedure closeTab (st : in out Gembrowse.UI.State.UIState; num : Positive) is
         wasLast : Boolean;
     begin
         wasLast := (num = tabs.Last_Index);
@@ -205,14 +143,14 @@ package body Gembrowse.UI is
         -- addressBarState.Active := False;
 
         if tabs.Is_Empty then
-            newTab;
+            newTab (st);
             return;
         end if;
 
         -- if we deleted the last tab, and it was active, we need to adjust the
         -- active tab.
         if num = activeTab and wasLast then
-            activeTab := tabs.Last_Index;
+            switchTab (st, tabs.Last_Index);
         end if;
     end closeTab;
 
@@ -300,6 +238,39 @@ package body Gembrowse.UI is
     end box;
 
     ---------------------------------------------------------------------------
+    -- erase contents of the current gemini page
+    ---------------------------------------------------------------------------
+    procedure clearPage (st : in out Gembrowse.UI.State.UIState) is
+    begin
+        -- erase lines
+        Console.setBGColor (Colors.currentTheme.bg);
+        Console.setCursor (1, PAGE_START);
+
+        for i in PAGE_START .. st.Window_Height - 4 loop
+            Console.eraseLine;
+            Put (ASCII.LF);
+        end loop;
+
+    end clearPage;
+
+    ---------------------------------------------------------------------------
+    -- loadPage
+    -- Given an address, load that page into the active tab.
+    -- @TODO push previous page to history
+    -- @TODO determine bookmark status
+    ---------------------------------------------------------------------------
+    procedure loadPage (st : in out Gembrowse.UI.State.UIState; url : Unbounded_String) is
+    begin
+        GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (url));
+
+        clearPage (st);
+
+        if not Gembrowse.net.fetchPage (url, tabs(activeTab).pageContents) then
+            tabs(activeTab).status := To_Unbounded_String ("Error loading " & To_String (url));
+        end if;
+    end loadPage;
+
+    ---------------------------------------------------------------------------
     -- renderTitle
     -- Render URL and Tabs
     ---------------------------------------------------------------------------
@@ -312,8 +283,6 @@ package body Gembrowse.UI is
             -- id      : constant Gembrowse.UI.State.ID := Gembrowse.UI.State.Next_ID (st);
             -- scope   : constant Gembrowse.UI.State.Scope_ID := st.Curr_Scope;
 
-            -- moreTabs : Boolean := True;
-            
             -- tracker for current draw position
             tx : Natural := 2;
 
@@ -334,7 +303,7 @@ package body Gembrowse.UI is
 
             -- show prev tab button
             if Button (st, 1, 2, "◀", "Previous Tab") then
-                activeTab := max (1, activeTab - 1);
+                switchTab (st, max (1, activeTab - 1));
             end if;
 
             Console.setCursor (1,3);
@@ -410,7 +379,7 @@ package body Gembrowse.UI is
 
                 -- Check for click on inactive tab
                 if st.Mouse_Down and then Region_Hit (st, tx1, ty1, tx2, ty2) then
-                    activeTab := t;
+                    switchTab (st, t);
                 end if;
             end loop;
 
@@ -431,7 +400,7 @@ package body Gembrowse.UI is
 
             if Button (st, tx, 2, "+", "New Tab (shortcut: Ctrl+t)",
                 Colors.currentTheme.ui, Colors.currentTheme.bg, 1, 1, 1, 1) then
-                newTab;
+                newTab (st);
             end if;
 
             Console.setCursor (tx, 3);
@@ -461,8 +430,12 @@ package body Gembrowse.UI is
             Put ("╗");
 
             -- show next tab button
-            if Button (st, w, 2, "▶", "Next Tab") then
-                activeTab := min (Natural (tabs.length), activeTab + 1);
+            if Button (st, w, 2, "▶", "Next Tab (shortcut: Shift+Tab)") then
+                if activeTab = tabs.Last_Index then
+                    switchTab (st, tabs.First_Index);
+                else
+                    switchTab (st, activeTab + 1);
+                end if;
             end if;
 
             -- show exit button
@@ -522,9 +495,11 @@ package body Gembrowse.UI is
             null;                   
         end if;
 
-        if Gembrowse.UI.Text_Field.Text_Field (st, tabs(activeTab).url, 14, 4, w - 14, w - 14) then
-            loadPage (tabs(activeTab).url);
+        if Gembrowse.UI.Text_Field.Text_Field (st, tabs(activeTab).url, 14, 4, w - 14, w - 14, highlightAddressBar) then
+            loadPage (st, tabs(activeTab).url);
         end if;
+
+        highlightAddressBar := False;
 
         -- if Bookmarked, say so.
         if tabs(activetab).bookmarked then
@@ -771,26 +746,15 @@ package body Gembrowse.UI is
             Put ("║");
         end loop;
 
-        -- right scrollbar
-        -- get position from current page
-        if Button (st, w-1, 6, "⬆", "Scroll up (shortcut: up arrow)") then
+        if Vertical_Scrollbar (st => st,
+                               x => w - 1,
+                               y => 6,
+                               Height => h - 10,
+                               Min => 0,
+                               Max => 100,
+                               Val => scrolly) then
             null;
         end if;
-        -- Console.setCursor (w-1, 6);
-        -- Put ("⬆");
-
-        for y in 7..h-5 loop
-            Console.setCursor (w-1, y);
-            Put ("░");
-        end loop;
-
-        Console.setCursor (w-1, h-4);
-        Put ("⬇");
-        
-        -- determine viewable area
-        -- scrollbar position
-        Console.setCursor (w-1, h-11);
-        Put ("▓");
 
         -- horiz scrollbar
         if Horizontal_Scrollbar (st => st,
@@ -798,26 +762,24 @@ package body Gembrowse.UI is
                                  y => h-3,
                                  Width => w-4,
                                  Min => 0,
-                                 Max => 10,
+                                 Max => 100,
                                  Val => scrollx) then
             null;
         end if;
-        -- Console.setCursor (2, h-3);
-        -- Put ("⬅");
 
-        -- for x in 2..w-4 loop
-        --     -- Console.setCursor (x, h-3);
-        --     Put ("░");
-        -- end loop;
-
-        -- Put ("➡");
-        -- Put ("█");
+        -- make it look a little nicer.
+        Console.setCursor (w-1, h-3);
+        Put ("█");
 
         Console.setCursor (vx, vy);
         
         if Length(tabs(activeTab).pageContents) = 0 then
             return;
         end if;
+
+        -- Need to open up a new scope here since certain widgets may be hidden
+        -- within the page itself.
+        Enter_Scope (st);
 
         -- Determine initial line type.
         curLineType := nextLineType (tabs(activeTab).pageContents, i);
@@ -851,6 +813,8 @@ package body Gembrowse.UI is
                 i := i + 1;
             end if;
         end loop;
+
+        Exit_Scope (st);
 
         setStyle (Plain);
     end renderPage;
@@ -985,6 +949,77 @@ package body Gembrowse.UI is
     end finishRender;
 
     ---------------------------------------------------------------------------
+    -- Global_Inputs
+    -- There are some input types (like mouse wheel, F5, Ctrl+t) that we'd
+    -- like to handle outside of rendering a particular widget. We do that here.
+    ---------------------------------------------------------------------------
+    procedure Global_Inputs (st : in out Gembrowse.UI.State.UIState) is
+        use Gembrowse.UI.Keys;
+    begin
+        -- mouse wheel
+        if st.Mouse_Buttons.Button_4 then
+            if scrolly > 0 then
+                scrolly := scrolly - 10;
+            end if;
+        elsif st.Mouse_Buttons.Button_5 then
+            if scrolly < 100 then
+                scrolly := scrolly + 10;
+            end if;
+        end if;
+
+        -- Ctrl key combos
+        if Length (st.Kbd_Text) > 0 then
+            -- Ctrl+t
+            if st.Kbd_Modifier.CTRL and Element (st.Kbd_Text, 1) = 't' then
+                newTab (st);
+
+                -- consume the 't' so nobody else gets it.
+                st.Kbd_Text := Null_Unbounded_String;
+            end if;
+        end if;
+
+        if Length (st.Kbd_Text) > 0 then
+            -- Ctrl+w
+            if st.Kbd_Modifier.CTRL and Element (st.Kbd_Text, 1) = 'w' then
+                closeTab (st, activeTab);
+
+                st.Kbd_Text := Null_Unbounded_String;
+            end if;
+        end if;
+
+        if Length (st.Kbd_Text) > 0 then
+            -- Ctrl+l
+            if st.Kbd_Modifier.CTRL and Element (st.Kbd_Text, 1) = 'l' then
+                highlightAddressBar := True;
+            end if;
+        end if;
+
+        -- Shift+Tab - move to next tab
+        if st.Kbd_Modifier.SHIFT and st.Kbd_Pressed = KEY_TAB then
+            if activeTab = tabs.Last_Index then
+                switchTab (st, tabs.First_Index);
+            else
+                switchTab (st, activeTab + 1);
+            end if;
+        end if;
+
+        -- Ctrl+Shift+Tab - move to previous tab
+        -- if st.Kbd_Modifier.CTRL and st.Kbd_Modifer.SHIFT and st.Kbd_Pressed = KEY_TAB then
+        --     if activeTab = tabs.First_Index then
+        --         activeTab := tabs.Last_Index;
+        --     else
+        --         activeTab := activeTab - 1;
+        --     end if;
+        -- end if;
+
+        -- F5
+        if st.Kbd_Pressed = KEY_F5 then
+            loadPage (st, tabs(activeTab).url);
+            st.Kbd_Pressed := KEY_NONE;
+        end if;
+    end Global_Inputs;
+
+    ---------------------------------------------------------------------------
     -- renderLoop
     -- Main drawing and input handling loop
     ---------------------------------------------------------------------------
@@ -995,7 +1030,7 @@ package body Gembrowse.UI is
         -- oldw, oldh : Natural;
         use Ada.Real_Time;
     begin
-        newTab;
+        newTab (GUI_State);
 
         Console.hideCursor;
         Console.rawMode;
@@ -1015,13 +1050,16 @@ package body Gembrowse.UI is
 
             Console.setBGColor (Colors.currentTheme.bg);
 
+            Global_Inputs (GUI_State);
+
             startRender (GUI_State);
             renderTitle (GUI_State);
             renderPage (GUI_State);
             footer (GUI_State);
             finishRender (GUI_State);
 
-            Handle_Inputs (GUI_State);
+            Get_Inputs (GUI_State);
+
 
             delay until nextPeriod;
 
