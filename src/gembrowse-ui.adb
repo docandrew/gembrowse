@@ -8,6 +8,8 @@
 -- @TODO - figure out how to divide keyboard focus between address bar and page, etc.
 -- @TODO - arrow keys for moving between tabs
 -- @TODO - viewport / scrollbars work
+-- @TODO - menu? plan is to just have separate pages for help, bookmarks,
+--  etc. but need a discoverable way to open those tabs.
 --
 -- Invariants:
 -- There will always be an active tab.
@@ -259,11 +261,29 @@ package body Gembrowse.UI is
     -- @TODO push previous page to history
     -- @TODO determine bookmark status
     ---------------------------------------------------------------------------
-    procedure loadPage (st : in out Gembrowse.UI.State.UIState; url : Unbounded_String) is
+    procedure loadPage (st : in out Gembrowse.UI.State.UIState; url : in out Unbounded_String) is
+        searchTerm : Unbounded_String;
     begin
+        if Length (url) = 0 then
+            return;
+        end if;
+        
         GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (url));
 
         clearPage (st);
+
+        -- take a look at the URL. First, it needs to be < 1024 chars
+        -- If it starts with gemini://, great. If not, insert that (keep in mind 1024 char limit).
+        -- If it has spaces, it's a search term.
+        -- if Index (url, " ", 1) then
+        --     searchTerm := normalize (url);
+        --     url := "gemini://geminispace.info/search?"
+        -- end if;
+
+        -- if Index (url, "file://", 1) = 1 then
+        --     -- try to load local file (only work with .gmi)
+        --     null;
+        -- end if;
 
         if not Gembrowse.net.fetchPage (url, tabs(activeTab).pageContents) then
             tabs(activeTab).status := To_Unbounded_String ("Error loading " & To_String (url));

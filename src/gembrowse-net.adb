@@ -57,7 +57,21 @@ package body Gembrowse.Net is
         tls_config_free (tlsConfig);
     end teardown;
 
-    function fetchPage (url : Unbounded_String; page : out Unbounded_String) return Boolean is
+    -- function percentEncode (term : Unbounded_String) return Unbounded_String is
+
+    -- begin
+    --     for i in 1..Length (term) loop
+    --         if not urlAllowed (Element (term, i)) then
+    --         end if;
+    --     end loop;
+    -- end percentEncode;
+
+    ---------------------------------------------------------------------------
+    -- fetchPage
+    ---------------------------------------------------------------------------
+    function fetchPage (url       : Unbounded_String;
+                        page      : out Unbounded_String) return Boolean is
+
         CRLF : constant String := ASCII.CR & ASCII.LF;
 
         fqdn : constant String := "localhost";
@@ -120,17 +134,23 @@ package body Gembrowse.Net is
         end if;
 
         -- receive header
-        readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
+        -- readLoop: loop
+            readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
+
+            -- if readLen = TLS_WANT_POLLIN or readLen = TLS_WANT_POLLOUT then
+            --     goto readLoop;
+            -- elsif readLen = -1 then
+
+        -- end loop;
 
         -- Put_Line ("Received" & readLen'Image & " bytes");
 
         -- if readLen < 0 then
         --     Console.Error ("Fatal: tls_read (" & Value (tls_error (tlsContext)) & ")");
         -- end if;
-
-        for i in 1..Integer(readLen) loop
-            Put (recvBuf(i));
-        end loop;
+        -- for i in 1..Integer(readLen) loop
+        --     Put (recvBuf(i));
+        -- end loop;
 
         -- receive body
         readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
