@@ -16,8 +16,7 @@ project Gembrowse is
                "-Llib",
                "-lcrypto",
                "-ltls",
-               "-lpthread",
-               "-pg"
+               "-lpthread"
             );
          when "release" =>
             for Switches ("ada") use (
@@ -49,15 +48,16 @@ project Gembrowse is
          when "debug" =>
             for Switches ("ada") use (
                "-gnat12",
+               "-gnatX",
                "-gnatf",
                "-gnateE",
                "-g",
                "-gnato",
-               "-fstack-check",
-               "-pg");
+               "-fstack-check");
          when "release" =>
             for Switches ("ada") use (
                "-gnat12",
+               "-gnatX",
                "-O2",
                "-mtune=native"
             );

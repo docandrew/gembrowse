@@ -25,6 +25,7 @@ with Interfaces;
 
 with Colors;
 with Console;
+with Util;
 
 with Gembrowse.Net; use Gembrowse.Net;
 with Gembrowse.UI.Buttons; use Gembrowse.UI.Buttons;
@@ -34,6 +35,7 @@ with Gembrowse.UI.State; use Gembrowse.UI.State;
 -- with Gembrowse.UI.Tab_Bar;
 with Gembrowse.UI.Scrollbars; use Gembrowse.UI.Scrollbars;
 with Gembrowse.UI.Text_Field; use Gembrowse.UI.Text_Field;
+with Gembrowse.URL;
 
 package body Gembrowse.UI is
 
@@ -96,13 +98,17 @@ package body Gembrowse.UI is
             ASCII.LF &
             "> This is a quote" & ASCII.LF &
             "> This is another quote" & ASCII.LF;
+
+        use PageStates;
+
+        newState : PageState := (title         => To_Unbounded_String ("New Tab"),
+                                 url           => To_Unbounded_String ("New Tab"),
+                                 tlsStatus     => True,
+                                 pageContents  => To_Unbounded_String (newTabContents),
+                                 status        => To_Unbounded_String ("✔️ Loaded 843b in .013s "),
+                                 others        => <>);
     begin
-        tabs.Append ((title         => To_Unbounded_String ("New Tab"),
-                      url           => To_Unbounded_String ("New Tab"),
-                      tlsStatus     => True,
-                      pageContents  => To_Unbounded_String (newTabContents),
-                      status        => To_Unbounded_String ("✔️ Loaded 843b in .013s "),
-                      others        => <>));
+        tabs.Append (newState);
         
         -- @TODO highlight whole address bar without having to click,
         highlightAddressBar := True;
@@ -263,30 +269,42 @@ package body Gembrowse.UI is
     ---------------------------------------------------------------------------
     procedure loadPage (st : in out Gembrowse.UI.State.UIState; url : in out Unbounded_String) is
         searchTerm : Unbounded_String;
+
+        -- we don't want to mess with the actual URL, if a user had a long search
+        -- term we should preserve their spaces in the url variable.
+        actualURL : Unbounded_String;
     begin
-        if Length (url) = 0 then
+        if url.Length = 0 then
             return;
         end if;
-        
-        GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (url));
 
         clearPage (st);
 
-        -- take a look at the URL. First, it needs to be < 1024 chars
-        -- If it starts with gemini://, great. If not, insert that (keep in mind 1024 char limit).
-        -- If it has spaces, it's a search term.
-        -- if Index (url, " ", 1) then
-        --     searchTerm := normalize (url);
-        --     url := "gemini://geminispace.info/search?"
-        -- end if;
+        -- Take a look at the URL. First, it needs to be < 1024 chars
 
-        -- if Index (url, "file://", 1) = 1 then
-        --     -- try to load local file (only work with .gmi)
-        --     null;
-        -- end if;
+        if Index (url, " ", 1) /= 0 then
+            -- If it has spaces, it's a search term.
+            searchTerm := url;
+            Gembrowse.URL.percentEncode (searchTerm);
+            actualURL := To_Unbounded_String ("gemini://geminispace.info/search?" & To_String (searchTerm));
 
-        if not Gembrowse.net.fetchPage (url, tabs(activeTab).pageContents) then
-            tabs(activeTab).status := To_Unbounded_String ("Error loading " & To_String (url));
+        elsif Index (url, "gemini://") /= 1 then
+            -- If it starts with gemini://, great. If not, insert that (keep in mind 1024 char limit).
+            actualURL := To_Unbounded_String ("gemini://" & To_String (url));
+        elsif Index (url, "file://", 1) = 1 then
+            -- try to load local file (only work with .gmi)
+            null;
+        end if;
+
+        GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (actualURL));
+
+        if actualURL.Length > 1024 then
+            st.Tooltip := To_Unbounded_String ("URL is too long (max length for Gemini is 1024)");
+            return;
+        end if;
+
+        if not Gembrowse.net.fetchPage (actualURL, tabs(activeTab).pageContents) then
+            tabs(activeTab).status := To_Unbounded_String ("Error loading " & To_String (actualURL));
         end if;
     end loadPage;
 
@@ -309,21 +327,16 @@ package body Gembrowse.UI is
             -- keep track of bounds of tab being drawn so we can detect a mouse press
             tx1, ty1, tx2, ty2 : Natural;
 
-            function max (l,r : Natural) return Natural is
-            begin
-                return (if l < r then r else l);
-            end max;
-
-            function min (l,r : Natural) return Natural is
-            begin
-                return (if l > r then r else l);
-            end min;
-
+            use Util;
         begin
 
             -- show prev tab button
             if Button (st, 1, 2, "◀", "Previous Tab") then
-                switchTab (st, max (1, activeTab - 1));
+                if activeTab = tabs.First_Index then
+                    switchTab (st, tabs.Last_Index);
+                else
+                    switchTab (st, activeTab - 1);
+                end if;
             end if;
 
             Console.setCursor (1,3);
@@ -397,10 +410,16 @@ package body Gembrowse.UI is
                 tx2 := tx - 1;
                 ty2 := 3;
 
-                -- Check for click on inactive tab
-                if st.Mouse_Down and then Region_Hit (st, tx1, ty1, tx2, ty2) then
-                    switchTab (st, t);
+                if Region_Hit (st, tx1, ty1, tx2, ty2) then
+                    -- Check for click on inactive tab,
+                    -- tooltip for tab closure on active tab
+                    if st.Mouse_Down and t /= activeTab then
+                        switchTab (st, t);
+                    elsif t = activeTab then
+                        st.Tooltip := To_Unbounded_String ("Close tab: Ctrl+w");
+                    end if;
                 end if;
+                
             end loop;
 
             tx1 := tx;
@@ -673,10 +692,10 @@ package body Gembrowse.UI is
         --  the end of the link line after this procedure call.
         -----------------------------------------------------------------------
         procedure parseLink (line : Unbounded_String; idx : in out Natural; url : out Unbounded_String; desc : out Unbounded_String) is
-            urlStart : Natural;
-            urlEnd : Natural;
-            descStart : Natural;
-            descEnd : Natural;
+            -- urlStart : Natural;
+            -- urlEnd : Natural;
+            -- descStart : Natural;
+            -- descEnd : Natural;
         begin
             null;
             -- loop
@@ -957,6 +976,8 @@ package body Gembrowse.UI is
         -- turn the tooltip off. If it remains hot, we'll leave it
         -- to whatever it was set to by the widget that may have set it last.
         if st.Hot_Item = NO_ITEM then
+            -- @TODO turn this back on when done debugging
+            -- null;
             st.Tooltip := Null_Unbounded_String;
         end if;
 
@@ -1011,6 +1032,8 @@ package body Gembrowse.UI is
             -- Ctrl+l
             if st.Kbd_Modifier.CTRL and Element (st.Kbd_Text, 1) = 'l' then
                 highlightAddressBar := True;
+                -- consume the text so we don't input it.
+                st.Kbd_Text := Null_Unbounded_String;
             end if;
         end if;
 
@@ -1063,8 +1086,6 @@ package body Gembrowse.UI is
         Console.termSize (GUI_State.Window_Width, GUI_State.Window_Height);
 
         loop
-            --@TODO may need to adjust this or the input handler, it seems
-            -- sometimes we miss mouse clicks
             startTime := Ada.Real_Time.Clock;
             nextPeriod := startTime + Ada.Real_Time.Milliseconds (33);     -- 30 fps
 
@@ -1080,12 +1101,12 @@ package body Gembrowse.UI is
 
             Get_Inputs (GUI_State);
 
-
             delay until nextPeriod;
 
             exit when GUI_State.Done;
         end loop;
 
+        Gembrowse.UI.Input.killInputs := True;
         Console.disableMouse;
         Console.normalMode;
         Console.showCursor;

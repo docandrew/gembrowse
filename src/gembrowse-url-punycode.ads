@@ -1,9 +1,13 @@
 -------------------------------------------------------------------------------
+-- gembrowse-url-punycode.ads
+--
 -- Internationalized Domain Names in Applications (IDNA)
 --
 -- Punycode encoding/decoding for Unicode domain labels.
 --
 -- Implementation translated from punycode.c in RFC 3492
+--
+-- Copyright 2022 Jon Andrew
 -------------------------------------------------------------------------------
 with Ada.Strings.Wide_Wide_Bounded;
 
@@ -11,7 +15,7 @@ with Interfaces; use Interfaces;
 
 with Gembrowse.URL.Hostnames; use Gembrowse.URL.Hostnames;
 
-package Gembrowse.URL.IDNA with SPARK_Mode is
+package Gembrowse.URL.Punycode with SPARK_Mode is
 
     -- Easiest just to convert our UTF-8 code points as single UTF-32 chars.
     package CodePoints is new Ada.Strings.Wide_Wide_Bounded.Generic_Bounded_Length (Max => LabelStrings.Max_Length);
@@ -26,16 +30,15 @@ package Gembrowse.URL.IDNA with SPARK_Mode is
         Overflow        -- input needs wider integers to process
     );
 
-    type PunycodeUint is new Unsigned_32;
-
     ---------------------------------------------------------------------------
     -- To_Ascii
     -- Convert Unicode to Punycode. Input is a UTF-8 bounded string. Returns
     -- False if conversion not possible, due either to invalid input or the
     -- resulting Punycode exceeding the maximum length of a DNS hostname label.
     ---------------------------------------------------------------------------
-    function To_Ascii (input  : LabelStrings.Bounded_String;
-                       output : out LabelStrings.Bounded_String) return Boolean;
+    procedure To_Ascii (input  : LabelStrings.Bounded_String;
+                        output : out LabelStrings.Bounded_String;
+                        result : out Boolean);
 
     ---------------------------------------------------------------------------
     -- To_Unicode
@@ -43,8 +46,9 @@ package Gembrowse.URL.IDNA with SPARK_Mode is
     -- False if conversion not possible, due either to invalid input or the
     -- resulting Punycode exceeding the maximum length of a DNS hostname label.
     ---------------------------------------------------------------------------
-    function To_Unicode (input  : LabelStrings.Bounded_String;
-                         output : out LabelStrings.Bounded_String) return Boolean;
+    procedure To_Unicode (input  : LabelStrings.Bounded_String;
+                          output : out LabelStrings.Bounded_String;
+                          result : out Boolean);
 
 
     ---------------------------------------------------------------------------
@@ -52,4 +56,4 @@ package Gembrowse.URL.IDNA with SPARK_Mode is
     ---------------------------------------------------------------------------
     procedure runTests;
 
-end Gembrowse.URL.IDNA;
+end Gembrowse.URL.Punycode;

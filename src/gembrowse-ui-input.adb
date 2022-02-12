@@ -1,14 +1,76 @@
-with Ada.Real_Time;
-with Ada.Strings.Fixed; use Ada.Strings.Fixed;
+-------------------------------------------------------------------------------
+-- gembrowse-ui-input.adb
+--
+-- Copyright 2022 Jon Andrew
+--
+-- ANSI/VT control code input handling. Gembrowse uses "normal" mode, not
+-- "application" mode, so input control sequences are handled accordingly.
+--
+-- See https://invisible-island.net/xterm/ctlseqs/ctlseqs.html for more info.
+--
+-- This is not a comprehensive handling for control sequences. Only the ones
+-- that Gembrowse cares about (more or less) are dealt with here.
+--
+-- This package uses a task running in the background, all stdin inputs are
+-- read by that task and then placed in a ring buffer via the protected
+-- InputQueue object. The main thread reads characters from that ring buffer
+-- until either a polling period has elapsed, or no more input is available.
+-------------------------------------------------------------------------------
+
+with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Real_Time; use Ada.Real_Time;
+with Ada.Strings.Bounded;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
-with Interfaces;
 
 with Console;
 
-with Gembrowse.UI.Keys;
-with Gembrowse.UI.State;
+with Gembrowse.UI.Keys; use Gembrowse.UI.Keys;
+with Gembrowse.UI.State; use Gembrowse.UI.State;
 
 package body Gembrowse.UI.Input is
+
+    -- Keep track of what we were doing in the input stream, so if we start
+    -- parsing an escape sequence mid-stream then break away to do something
+    -- else, we can resume getting the sequence.
+    type ParserState is (
+        UNDEFINED,            -- got some kind of a weird control code we can't handle.
+                              --  discard characters until input stops.
+        NONE,
+        CONTROL,
+        PRINTABLE,
+        ESCAPE,               -- read a single ESC, need to determine what kind of control sequence
+        SS3,                  -- ESC O, expect a single character next
+        CSI,                  -- ESC [, control sequence indicator
+        EXPECT_TILDE,         -- Have a complete control code, expect terminating ~
+        CSI_1,                -- ESC [ 1
+        CSI_2,                -- ESC [ 2
+        CSI_1_SEMI,           -- ESC [ 1 ;
+        CSI_1_SEMI_2,         -- ESC [ 1 ; 2
+        CSI_1_SEMI_5,         -- ESC [ 1 ; 5
+        CSI_1_SEMI_6,         -- ESC [ 1 ; 6
+        MOUSE_BUTTON,         -- ESC [ <                     Get mouse button as a number
+        MOUSE_COORD_X,        -- ESC [ < num ;               Getting mouse x coordinate
+        MOUSE_COORD_Y         -- ESC [ < num ; num ; num     Getting mouse y coordinate. We're done
+                              --                              when we get the terminating m or M.
+    );
+
+    parseState : ParserState := NONE;
+
+    -- some keys need to have a terminating ~ before we can say "it's been pressed"
+    -- we'll keep track of what it is here.
+    proposedKeypress : Key_Codes;
+    
+    -- As we parse a mouse code, keep track of these digits
+    -- @NOTE if we ever switch to SGR pixel mode for the mouse, this will need to
+    -- be at least 4 digits.
+    package MouseNumbers is new Ada.Strings.Bounded.Generic_Bounded_Length (Max => 3);
+    use MouseNumbers;
+
+    -- extra state for the mouse button/coordinates as we parse.
+    mouseNum : Bounded_String;
+    mouseButton : Natural;
+    mouseX : Natural;
+    mouseY : Natural;
 
     ---------------------------------------------------------------------------
     -- Detect whether the mouse is in a certain region.
@@ -25,10 +87,22 @@ package body Gembrowse.UI.Input is
     -- Get_Inputs
     ---------------------------------------------------------------------------
     procedure Get_Inputs (st : in out Gembrowse.UI.State.UIState) is
-        chr : Character;
+        chr       : Character;
+        moreInput : Boolean := False;
+
+        -- ANSI escape codes for mouse button held down plus movement are
+        -- button + 32. Since we register the clicks separately, just treat
+        -- everything in the range 32-35 as a movement.
+        MOUSE_MOVE_L  : constant := 32;
+        MOUSE_MOVE_H  : constant := 35;
+
+        LEFT_CLICK   : constant := 0;
+        MIDDLE_CLICK : constant := 1;
+        RIGHT_CLICK  : constant := 2;
+        WHEEL_UP     : constant := 64;
+        WHEEL_DN     : constant := 65;
 
         use Gembrowse.UI.Keys;
-        use Interfaces;
 
         -----------------------------------------------------------------------
         -- printable
@@ -36,257 +110,371 @@ package body Gembrowse.UI.Input is
         -----------------------------------------------------------------------
         procedure printable (c : Character) is
         begin
-            st.Kbd_Text := To_Unbounded_String ("" & c);
+            Append (st.Kbd_Text, c);
         end printable;
 
         -----------------------------------------------------------------------
-        -- isMouseSequence
-        -- If escSequence is potentially a mouse input, return True. Otherwise,
-        -- return False.
+        -- escape
+        -- Process the next character in an escape sequence.
+        -- These can be responses to terminal queries, or special keypresses,
+        -- or mouse inputs. The initial escape character should have already
+        -- been consumed from the input stream. This will look at subsequent
+        -- characters and advance the parser state. When the parser reaches a
+        -- terminal character, we'll either have a full escape sequence or
+        -- something we don't recognize. If it's something we don't recognize,
+        -- we put the parser into an UNDEFINED state so further inputs in the
+        -- stream are discarded.
         -----------------------------------------------------------------------
-        function isMouseSequence (escSequence : Unbounded_String) return Boolean is
+        procedure escape (c : Character) is
         begin
-            return (Length (escSequence) >= 8 and then 
-                    (Element(escSequence, 1) = '[' and 
-                     Element(escSequence, 2) = '<' and 
-                     (Element(escSequence, Length(escSequence)) = 'm' or
-                      Element(escSequence, Length(escSequence)) = 'M')));
-        end isMouseSequence;
-
-        -----------------------------------------------------------------------
-        -- handleMouse
-        -- Given an escape sequence representing a mouse input, handle it
-        -- appropriately.
-        -----------------------------------------------------------------------
-        procedure handleMouse (escSequence : Unbounded_String) is
-            data  : String  := To_String (escSequence);
-            lt    : Natural := Index (data, "<", data'First);
-            semi1 : Natural := Index (data, ";", lt);
-            semi2 : Natural := Index (data, ";", semi1+1);
-
-            buttonStr : String := data(lt+1..semi1-1);
-            posxStr   : String := data(semi1+1..semi2-1);
-            posyStr   : String := data(semi2+1..data'Last-1);
-
-            button, posx, posy : Natural;
-
-            mtype  : Character := Element (escSequence, Length (escSequence));
-
-            badSeq : Boolean := False;
-
-            -- ANSI escape codes for mouse button held down plus movement are
-            -- button + 32. Since we register the clicks separately, just treat
-            -- everything in the range 32-35 as a movement.
-            MOUSE_MOVE_L  : constant := 32;
-            MOUSE_MOVE_H  : constant := 35;
-
-            LEFT_CLICK   : constant := 0;
-            MIDDLE_CLICK : constant := 1;
-            RIGHT_CLICK  : constant := 2;
-            WHEEL_UP     : constant := 64;
-            WHEEL_DN     : constant := 65;
-
-            use Ada.Real_Time;
-        begin
-            -- Quick sanity check here, if we get a goofed up escSequence, QC our values before proceeding.
-            for c of buttonStr loop
-                if c not in '0'..'9' then
-                    badSeq := True;
-                    return;
-                end if;
-            end loop;
-
-            for c of posxStr loop
-                if c not in '0'..'9' then
-                    badSeq := True;
-                    return;
-                end if;
-            end loop;
             
-            for c of posyStr loop
-                if c not in '0'..'9' then
-                    badSeq := True;
-                    return;
-                end if;
-            end loop;
-            
-            button := Natural'Value (buttonStr);
-            posx   := Natural'Value (posxStr);
-            posy   := Natural'Value (posyStr);
+            case parseState is
+                when ESCAPE =>
+                    -- read the next character to see what kind of control
+                    -- sequence to expect. If no character is present, it
+                    -- was a literal escape key by itself.
+                    case c is
+                        when ASCII.NUL =>
+                            -- st.Tooltip := To_Unbounded_String ("ESC");
+                            st.Kbd_Pressed := KEY_ESC;
+                            parseState := NONE;
+                        when 'O' =>
+                            parseState := SS3;
+                        when '[' =>
+                            parseState := CSI;
+                        when others =>
+                            -- something we don't know how to handle
+                            st.Error := UNKNOWN_CONTROL_SEQUENCE;
+                            parseState := UNDEFINED;
+                    end case;
 
-            if button >= MOUSE_MOVE_L and button <= MOUSE_MOVE_H then
-                st.Mouse_X := posx;
-                st.Mouse_Y := posy;
-                st.Hover_Start := Ada.Real_Time.Clock;
-            elsif button = LEFT_CLICK then
-                if mtype = 'M' then
-                    st.Mouse_Down := True;
-
-                    -- Measure interval between clicks to see if double-click occurred.
-                    if Ada.Real_Time.Clock <= st.Last_Click + Ada.Real_Time.Milliseconds (500) then
-                        st.Double_Click := True;
-                        -- tooltip := To_Unbounded_String ("Double Click");
+                when EXPECT_TILDE =>
+                    if c = '~' then
+                        st.Kbd_Pressed := proposedKeypress;
+                        parseState := NONE;
+                    else
+                        st.Error := WANTED_TILDE;
+                        parseState := UNDEFINED;
                     end if;
 
-                    st.Last_Click := Ada.Real_Time.Clock;
-                elsif mtype = 'm' then
-                    st.Mouse_Down := False;
-                    st.Word_Select := False;
-                end if;
-            elsif button = MIDDLE_CLICK then
-                st.Mouse_Buttons.Button_1 := True;
-            elsif button = RIGHT_CLICK then
-                st.Mouse_Buttons.Button_2 := True;
-            elsif button = WHEEL_UP then
-                st.Mouse_Buttons.Button_4 := True;
-            elsif button = WHEEL_DN then
-                st.Mouse_Buttons.Button_5 := True;
-            end if;
-        end handleMouse;
+                when SS3 =>
+                    -- expect a single character afterwards. we only get a few
+                    -- of these.
+                    case c is
+                        when 'P' => 
+                            st.Kbd_Pressed := KEY_F1;
+                            parseState := NONE;
+                        when 'Q' =>
+                            st.Kbd_Pressed := KEY_F2;
+                            parseState := NONE;
+                        when 'R' => 
+                            st.Kbd_Pressed := KEY_F3;
+                            parseState := NONE;
+                        when 'S' =>
+                            st.Kbd_Pressed := KEY_F4;
+                            parseState := NONE;
+                        when others =>
+                            st.Error := UNKNOWN_SS3;
+                            parseState := UNDEFINED;
+                    end case;
+                
+                when CSI =>
+                    case c is
+                        -- check for single character codes first.
+                        when 'A' =>
+                            st.Kbd_Pressed := KEY_UP;
+                            parseState := NONE;
+                        when 'B' =>
+                            st.Kbd_Pressed := KEY_DOWN;
+                            parseState := NONE;
+                        when 'C' =>
+                            st.Kbd_Pressed := KEY_RIGHT;
+                            parseState := NONE;
+                        when 'D' =>
+                            st.Kbd_Pressed := KEY_LEFT;
+                            parseState := NONE;
+                        when 'F' =>
+                            st.Kbd_Pressed := KEY_END;
+                            parseState := NONE;
+                        when 'H' =>
+                            st.Kbd_Pressed := KEY_HOME;
+                            parseState := NONE;
+                        when 'Z' =>
+                            st.Kbd_Pressed := KEY_TAB;
+                            st.Kbd_Modifier.Shift := True;
+                            parseState := NONE;
 
-        -----------------------------------------------------------------------
-        -- escapeSequence
-        -- If we got an escape sequence, process it here.
-        -----------------------------------------------------------------------
-        procedure escapeSequence (escSequence : Unbounded_String) is
-            F1      : constant String := "OP";
-            F2      : constant String := "OQ";
-            F3      : constant String := "OR";
-            F4      : constant String := "OS";
-            F5      : constant String := "[15~";
-            F6      : constant String := "[17~";
-            F7      : constant String := "[18~";
-            F8      : constant String := "[19~";
-            F9      : constant String := "[20~";
-            INS     : constant String := "[2~";
-            HOME    : constant String := "[H";
-            ENDK    : constant String := "[F";
-            PGUP    : constant String := "[5~";
-            PGDN    : constant String := "[6~";
-            DEL     : constant String := "[3~";
-            UP      : constant String := "[A";
-            DOWN    : constant String := "[B";
-            RIGHT   : constant String := "[C";
-            LEFT    : constant String := "[D";
+                        -- these will all have more chars to follow.
+                        when '1' =>
+                            parseState := CSI_1;
+                        when '2' =>
+                            parseState := CSI_2;
+                        when '<' =>
+                            -- Looks like a mouse input
+                            -- After this, we expect a number
+                            -- representing either a button
+                            -- or 32-35 for movements.
+                            mouseNum := Null_Bounded_String;
+                            mouseX := 0;
+                            mouseY := 0;
+                            mouseButton := Natural'Last;
+                            
+                            parseState := MOUSE_BUTTON;
+                        when '3' =>
+                            proposedKeypress := KEY_DEL;
+                            parseState := EXPECT_TILDE;
+                        when '5' =>
+                            proposedKeypress := KEY_PGUP;
+                            parseState := EXPECT_TILDE;
+                        when '6' =>
+                            proposedKeypress := KEY_PGDN;
+                            parseState := EXPECT_TILDE;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
+                
+                when CSI_1 =>
+                    case c is
+                        when ';' =>
+                            -- some kind of shift or ctrl combo
+                            parseState := CSI_1_SEMI;
+                        when '5' =>
+                            proposedKeypress := KEY_F5;
+                            parseState := EXPECT_TILDE;
+                        when '7' =>
+                            proposedKeypress := KEY_F6;
+                            parseState := EXPECT_TILDE;
+                        when '8' =>
+                            proposedKeypress := KEY_F7;
+                            parseState := EXPECT_TILDE;
+                        when '9' =>
+                            proposedKeypress := KEY_F8;
+                            parseState := EXPECT_TILDE;
+                        when others =>
+                            st.Error := UNKNOWN_CSI_1;
+                            parseState := UNDEFINED;
+                    end case;
+                
+                when CSI_2 =>
+                    case c is
+                        when '0' =>
+                            proposedKeypress := KEY_F9;
+                            parseState := EXPECT_TILDE;
+                        when '1' =>
+                            proposedKeypress := KEY_F10;
+                            parseState := EXPECT_TILDE;
+                        when '3' =>
+                            proposedKeypress := KEY_F11;
+                            parseState := EXPECT_TILDE;
+                        when '4' =>
+                            proposedKeypress := KEY_F12;
+                            parseState := EXPECT_TILDE;
+                        when '~' =>
+                            st.Kbd_Pressed := KEY_INS;
+                            parseState := NONE;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
 
-            SHIFT_TAB : constant String := "[Z";
+                when CSI_1_SEMI =>
+                    case c is
+                        when '2' =>
+                            parseState := CSI_1_SEMI_2;
+                        when '5' =>
+                            parseState := CSI_1_SEMI_5;
+                        when '6' =>
+                            parseState := CSI_1_SEMI_6;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
 
-            SHIFT_HOME : constant String := "[1;2H";
-            SHIFT_END  : constant String := "[1;2F";
+                when CSI_1_SEMI_2 =>
+                    case c is
+                        --@TODO guessing A and B are ctrl+up/down
+                        when 'C' =>
+                            st.Kbd_Pressed := KEY_RIGHT;
+                            st.Kbd_Modifier.SHIFT := True;
+                            parseState := NONE;
+                        when 'D' =>
+                            st.Kbd_Pressed := KEY_LEFT;
+                            st.Kbd_Modifier.SHIFT := True;
+                            parseState := NONE;
+                        when 'F' =>
+                            st.Kbd_Pressed := KEY_END;
+                            st.Kbd_Modifier.SHIFT := True;
+                            parseState := NONE;
+                        when 'H' =>
+                            st.Kbd_Pressed := KEY_HOME;
+                            st.Kbd_Modifier.SHIFT := True;
+                            parseState := NONE;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
+                
+                when CSI_1_SEMI_5 =>
+                    case c is
+                        --@TODO guessing A and B are ctrl+up/down
+                        when 'C' =>
+                            st.Kbd_Pressed := KEY_RIGHT;
+                            st.Kbd_Modifier.CTRL := True;
+                            parseState := NONE;
+                        when 'D' =>
+                            st.Kbd_Pressed := KEY_LEFT;
+                            st.Kbd_Modifier.CTRL := True;
+                            parseState := NONE;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
 
-            CTRL_RIGHT : constant String := "[1;5C";
-            CTRL_LEFT  : constant String := "[1;5D";
+                when CSI_1_SEMI_6 =>
+                    case c is
+                        --@TODO guessing A and B are ctrl+shift+up/down
+                        when 'C' =>
+                            st.Kbd_Pressed := KEY_RIGHT;
+                            st.Kbd_Modifier.SHIFT := True;
+                            st.Kbd_Modifier.CTRL := True;
+                            parseState := NONE;
+                        when 'D' =>
+                            st.Kbd_Pressed := KEY_LEFT;
+                            st.Kbd_Modifier.SHIFT := True;
+                            st.Kbd_Modifier.CTRL := True;
+                            parseState := NONE;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
+                
+                when MOUSE_BUTTON =>
+                    case c is
+                        when '0'..'9' =>
+                            -- did we somehow get an extra digit?
+                            if mouseNum.Length = MouseNumbers.Max_Length then
+                                st.Error := MOUSE_COORD_TOO_BIG;
+                                mouseNum := Null_Bounded_String;
+                                parseState := UNDEFINED;
+                            else
+                                mouseNum.Append (c);
+                            end if;
+                        when ';' =>
+                            if mouseNum.Length = 0 then
+                                -- if we got ESC[<;
+                                st.Error := MOUSE_COORD_TOO_SMALL;
+                                mouseNum := Null_Bounded_String;
+                                parseState := UNDEFINED;
+                            else
+                                -- OK, we got a button. Record it and reset
+                                -- mouseNum for the X coordinate.
+                                mouseButton := Natural'Value (mouseNum.To_String);
+                                mouseNum := Null_Bounded_String;
+                                parseState := MOUSE_COORD_X;
+                            end if;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
 
-            SHIFT_RIGHT : constant String := "[1;2C";
-            SHIFT_LEFT : constant String := "[1;2D";
+                when MOUSE_COORD_X =>
+                    case c is
+                        when '0'..'9' =>
+                            -- did we somehow get an extra digit?
+                            if mouseNum.Length = MouseNumbers.Max_Length then
+                                st.Error := MOUSE_COORD_TOO_BIG;
+                                mouseNum := Null_Bounded_String;
+                                parseState := UNDEFINED;
+                            else
+                                mouseNum.Append (c);
+                            end if;
+                        when ';' =>
+                            if mouseNum.Length = 0 then
+                                -- if we got ESC[>;
+                                st.Error := MOUSE_COORD_TOO_SMALL;
+                                mouseNum := Null_Bounded_String;
+                                parseState := UNDEFINED;
+                            else
+                                -- OK, we got a coord. Record it and reset
+                                -- mouseNum for the Y coordinate.
+                                mouseX := Natural'Value (mouseNum.To_String);
+                                mouseNum := Null_Bounded_String;
+                                parseState := MOUSE_COORD_Y;
+                            end if;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
 
-            CTRL_SHIFT_RIGHT : constant String := "[1;6C";
-            CTRL_SHIFT_LEFT  : constant String := "[1;6D";
-        begin
-            if To_String (escSequence) = F1 then
-                st.Kbd_Pressed := KEY_F1;
-            elsif To_String (escSequence) = F2 then
-                st.Kbd_Pressed := KEY_F2;
-            elsif To_String (escSequence) = F3 then
-                st.Kbd_Pressed := KEY_F3;
-            elsif To_String (escSequence) = F4 then
-                st.Kbd_Pressed := KEY_F4;
-            elsif To_String (escSequence) = F5 then
-                st.Kbd_Pressed := KEY_F5;
-            elsif To_String (escSequence) = F6 then
-                st.Kbd_Pressed := KEY_F6;
-            elsif To_String (escSequence) = F7 then
-                st.Kbd_Pressed := KEY_F7;
-            elsif To_String (escSequence) = F8 then
-                st.Kbd_Pressed := KEY_F8;
-            elsif To_String (escSequence) = F9 then
-                st.Kbd_Pressed := KEY_F9;
-            elsif To_String (escSequence) = INS then
-                st.Kbd_Pressed := KEY_INS;
-            elsif To_String (escSequence) = HOME then
-                st.Kbd_Pressed := KEY_HOME;
-            elsif To_String (escSequence) = PGUP then
-                st.Kbd_Pressed := KEY_PGUP;
-            elsif To_String (escSequence) = PGDN then
-                st.Kbd_Pressed := KEY_PGDN;
-            elsif To_String (escSequence) = ENDK then
-                st.Kbd_Pressed := KEY_END;
-            elsif To_String (escSequence) = DEL then
-                st.Kbd_Pressed := KEY_DEL;
-            elsif To_String (escSequence) = UP then
-                st.Kbd_Pressed := KEY_UP;
-            elsif To_String (escSequence) = DOWN then
-                st.Kbd_Pressed := KEY_DOWN;
-            elsif To_String (escSequence) = RIGHT then
-                st.Kbd_Pressed := KEY_RIGHT;
-            elsif To_String (escSequence) = LEFT then
-                st.Kbd_Pressed := KEY_LEFT;
-            elsif To_String (escSequence) = SHIFT_TAB then
-                st.Kbd_Pressed := KEY_TAB;
-                st.Kbd_Modifier.Shift := True;
-            elsif To_String (escSequence) = SHIFT_HOME then
-                st.Kbd_Pressed := KEY_HOME;
-                st.Kbd_Modifier.SHIFT := True;
-            elsif To_String (escSequence) = SHIFT_END then
-                st.Kbd_Pressed := KEY_END;
-                st.Kbd_Modifier.SHIFT := True;
-            elsif To_String (escSequence) = CTRL_RIGHT then
-                st.Kbd_Pressed := KEY_RIGHT;
-                st.Kbd_Modifier.CTRL := True;
-            elsif To_String (escSequence) = CTRL_LEFT then
-                st.Kbd_Pressed := KEY_LEFT;
-                st.Kbd_Modifier.CTRL := True;
-            elsif To_String (escSequence) = SHIFT_LEFT then
-                st.Kbd_Pressed := KEY_LEFT;
-                st.Kbd_Modifier.SHIFT := True;
-            elsif To_String (escSequence) = SHIFT_RIGHT then
-                st.Kbd_Pressed := KEY_RIGHT;
-                st.Kbd_Modifier.SHIFT := True;
-            elsif To_String (escSequence) = CTRL_SHIFT_LEFT then
-                st.Kbd_Pressed := KEY_LEFT;
-                st.Kbd_Modifier.CTRL := True;
-                st.Kbd_Modifier.SHIFT := True;
-            elsif To_String (escSequence) = CTRL_SHIFT_RIGHT then
-                st.Kbd_Pressed := KEY_RIGHT;
-                st.Kbd_Modifier.CTRL := True;
-                st.Kbd_Modifier.SHIFT := True;
-            elsif isMouseSequence (escSequence) then
-                -- st.tooltip := escSequence;
-                handleMouse (escSequence);
-            else
-                null;   -- @TODO probably other useful sequences to handle.
-                st.tooltip := escSequence;
-            end if;
-        end escapeSequence;
+                when MOUSE_COORD_Y =>
+                    case c is
+                        when '0'..'9' =>
+                            -- did we somehow get an extra digit?
+                            if mouseNum.Length = MouseNumbers.Max_Length then
+                                st.Error := MOUSE_COORD_TOO_BIG;
+                                mouseNum := Null_Bounded_String;
+                                parseState := UNDEFINED;
+                            else
+                                mouseNum.Append (c);
+                            end if;
+                        when 'm' | 'M' =>
+                            if mouseNum.Length = 0 then
+                                -- if we got ESC[<x;;
+                                st.Error := MOUSE_COORD_TOO_SMALL;
+                                mouseNum := Null_Bounded_String;
+                                parseState := UNDEFINED;
+                            else
+                                -- OK, we got the y coord. Record it and determine
+                                -- button press/release
+                                mouseY := Natural'Value (mouseNum.To_String);
+                                mouseNum := Null_Bounded_String;
 
-        -----------------------------------------------------------------------
-        -- escape
-        -- Get escape sequences. These can be responses to terminal queries,
-        -- or special keypresses, or mouse inputs.
-        -----------------------------------------------------------------------
-        procedure escape is
-            escSequence : Unbounded_String;
-        begin
-            -- see if more input is waiting (multi char escape sequence)
-            loop
-                chr := Console.getch;
-                exit when chr = ASCII.NUL;
-                Append (escSequence, chr);
-            end loop;
+                                case c is
+                                    -- we can complete the input now
+                                    when 'm' | 'M' =>
+                                        if mouseButton >= MOUSE_MOVE_L and mouseButton <= MOUSE_MOVE_H then
+                                            st.Mouse_X := mouseX;
+                                            st.Mouse_Y := mouseY;
+                                        elsif mouseButton = LEFT_CLICK then
+                                            if c = 'M' then
+                                                st.Mouse_Down := True;
 
-            -- useful for getting new esc sequences
-            -- tooltip := escSequence;
+                                                -- measure interval between clicks for double-click
+                                                if Ada.Real_Time.Clock <= st.Last_Click + Ada.Real_Time.Milliseconds (500) then
+                                                    st.Double_Click := True;
+                                                end if;
 
-            -- if we hit ESC by itself, we'll have an empty escSequence
-            if Length (escSequence) = 0 then
-                -- if editingURL then
-                --     selectNone;
-                -- end if;
-                st.Kbd_Pressed := KEY_ESC;
-                return;
-            end if;
+                                                st.Last_Click := Ada.Real_Time.Clock;
+                                            else
+                                                st.Mouse_Down := False;
+                                                st.Word_Select := False;
+                                            end if;
+                                        elsif mouseButton = MIDDLE_CLICK then
+                                            st.Mouse_Buttons.Button_1 := (c = 'M');
+                                        elsif mouseButton = RIGHT_CLICK then
+                                            st.Mouse_Buttons.Button_2 := (c = 'M');
+                                        elsif mouseButton = WHEEL_UP then
+                                            st.Mouse_Buttons.Button_4 := True;
+                                        elsif mouseButton = WHEEL_DN then
+                                            st.Mouse_Buttons.Button_5 := True;
+                                        end if;
 
-            escapeSequence (escSequence);
+                                        parseState := NONE;
+                                    when others =>
+                                        st.Error := UNKNOWN_MOUSE_PRESS;
+                                        parseState := UNDEFINED;
+                                end case;
+                            end if;
+                        when others =>
+                            st.Error := UNKNOWN_CSI;
+                            parseState := UNDEFINED;
+                    end case;
+
+                when others =>
+                    st.Error := UNKNOWN_CONTROL_SEQUENCE;
+                    parseState := UNDEFINED;
+            end case;
         end escape;
 
         -----------------------------------------------------------------------
@@ -350,35 +538,68 @@ package body Gembrowse.UI.Input is
                     st.Kbd_Text := To_Unbounded_String ("b");
                     st.Kbd_Modifier.CTRL := True;
                 when others =>
-                    st.tooltip := To_Unbounded_String ("key: " & pos'Image);
+                    -- st.tooltip := To_Unbounded_String ("key: " & pos'Image);
+                    null;
             end case;
         end control;
+
+        use Ada.Real_Time;
+
+        -- When this is called, we'll poll stdin for new inputs.
+        now      : Ada.Real_Time.Time := Ada.Real_Time.Clock;
+        donePoll : Ada.Real_Time.Time := now + Ada.Real_Time.Milliseconds (20);
+        -- escSequence : Unbounded_String := Null_Unbounded_String;
     begin
         st.Kbd_Modifier := (others => FALSE);
         st.Kbd_Pressed  := KEY_NONE;
         st.Kbd_Text     := Ada.Strings.Unbounded.Null_Unbounded_String;
+        parseState      := NONE;
 
-        -- returns NUL if no input available
-        chr := Console.getch;
+        -- If we are in the middle of an escape sequence, finish it before exiting the loop.
+        while Ada.Real_Time.Clock < donePoll or
+              (parseState /= NONE and parseState /= UNDEFINED) loop
+            
+            chr := Console.getch;
 
-        case chr is
-            when ASCII.NUL =>
-                return;
-            when ASCII.SOH..ASCII.SUB | ASCII.DEL =>
-                control (chr);
-            when ' '..'~' =>
-                -- normal printable char
-                printable (chr);
-            when ASCII.ESC =>
-                escape;
-            when others =>
-                null;
-                -- declare
-                --     pos : Natural := Character'Pos (chr);
-                -- begin
-                --     tooltip := To_Unbounded_String ("asdf: " & pos'Image);
-                -- end;
-        end case;
+            if parseState = NONE then
+                case chr is
+                    when ASCII.NUL =>
+                        null;
+                        -- early return? bother checking again here?
+                        -- might be more responsive if we bug out early.
+                    when ASCII.SOH..ASCII.SUB | ASCII.DEL =>
+                        parseState := CONTROL;
+                        control (chr);
+                        parseState := NONE;
+                    when ' '..'~' =>
+                        parseState := PRINTABLE;
+                        printable (chr);
+                        parseState := NONE;
+                    when ASCII.ESC =>
+                        parseState := ESCAPE;
+
+                        -- Already ate the first ESC char in the stream.
+                        -- Pass the next char to escape()
+                        chr := Console.getch;
+                        escape (chr);
+                    when others =>
+                        null;
+                end case;
+            elsif parseState = UNDEFINED then
+                case chr is
+                    when ASCII.NUL =>
+                        -- only leave the undefined state if input runs out, then reset.
+                        parseState := NONE;
+                        st.Error := NO_ERROR;
+                    when others =>
+                        -- silently discard until input stream empties out.
+                        null;
+                end case;
+            else
+                -- resume where we left off in the middle of the escape sequence.
+                escape (chr);
+            end if;
+        end loop;
     end Get_Inputs;
 
 end Gembrowse.UI.Input;

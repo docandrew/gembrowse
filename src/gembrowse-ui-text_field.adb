@@ -1,3 +1,8 @@
+-------------------------------------------------------------------------------
+-- gembrowse-ui-text_field.adb
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Ada.Strings.Unbounded;
 with Ada.Text_IO; use Ada.Text_IO;
 
@@ -5,6 +10,7 @@ with Interfaces.C; use Interfaces.C;
 
 with Colors;
 with Console;
+with Util;
 
 with Gembrowse.UI.Input; use Gembrowse.UI.Input;
 with Gembrowse.UI.Keys;
@@ -58,7 +64,7 @@ package body Gembrowse.UI.Text_Field is
                                   return Boolean
     is
         package UBS renames Ada.Strings.Unbounded;
-        
+
         use Gembrowse.UI.Keys;
         use Gembrowse.UI.State;
         
@@ -155,7 +161,7 @@ package body Gembrowse.UI.Text_Field is
             
             when KEY_RIGHT =>
                 if st.Cursor_Pos <= UBS.Length (Text) then
-                    -- if this is a ctrl+click, then we advance the
+                    -- if this is a ctrl+arrow, then we advance the
                     -- cursor to the next word.
                     if st.Kbd_Modifier.CTRL then
                         Skip_Word_Right (st, Text);
@@ -453,6 +459,8 @@ package body Gembrowse.UI.Text_Field is
                 Put (To_String (Text));
             else
                 if UBS.Length(Text) > 0 then
+                    -- determine which characters we're actually drawing.
+
                     -- render character-by-character so we can apply
                     -- correct styles to selection and get accurate cursor
                     -- placement.
@@ -496,7 +504,7 @@ package body Gembrowse.UI.Text_Field is
                         elsif Cursor_Drag_Update and Text_x >= st.Mouse_x and not st.Word_Select then
                             --@TODO handle expansion of selection when st.Word_Select is on.
                             --Ada.Text_IO.Put_Line ("drag" & i'Image);
-                            st.tooltip := To_Unbounded_String ("Dragging" & i'Image & st.Mouse_x'Image);
+                            -- st.tooltip := To_Unbounded_String ("Dragging" & i'Image & st.Mouse_x'Image);
                             -- if dragging the mouse, set cursor and adjust the
                             -- selection based on direction.
                             if i > st.Cursor_Pos then

@@ -190,7 +190,7 @@ package body Console is
     procedure enableMouse is
     begin
         Put (ASCII.ESC & "[?1003h" &    -- any mouse event
-             ASCII.ESC & "[?1006h");    -- additional mouse response
+             ASCII.ESC & "[?1006h");    -- additional mouse response w/ coords
     end enableMouse;
 
     procedure disableMouse is

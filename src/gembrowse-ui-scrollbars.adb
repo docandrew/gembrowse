@@ -1,4 +1,8 @@
-
+-------------------------------------------------------------------------------
+-- gembrowse-ui-scrollbars.adb
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Ada.Text_IO; use Ada.Text_IO;
 
 with Colors;
@@ -10,8 +14,6 @@ with Gembrowse.UI.Keys; use Gembrowse.UI.Keys;
 with Gembrowse.UI.State; use Gembrowse.UI.State;
 
 package body Gembrowse.UI.Scrollbars is
-
-
 
     ---------------------------------------------------------------------------
     -- Horizontal Scrollbar

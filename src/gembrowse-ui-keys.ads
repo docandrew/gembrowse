@@ -1,3 +1,12 @@
+-------------------------------------------------------------------------------
+-- gembrowse-ui-keys.ads
+--
+-- Constants for key codes. We use our own keycode definitions here, these do
+-- not correspond to any sort of official "scan code" or anything else. We map
+-- ANSI terminal escape sequences to a keypress defined here.
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 package Gembrowse.UI.Keys is
 
     ----------------------------------------------------------------------------
@@ -14,6 +23,9 @@ package Gembrowse.UI.Keys is
         KEY_F7,
         KEY_F8,
         KEY_F9,
+        KEY_F10,
+        KEY_F11,
+        KEY_F12,
         KEY_ESC,
         KEY_ENTER,
         KEY_PRTSC,

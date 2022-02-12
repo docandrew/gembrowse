@@ -1,3 +1,10 @@
+-------------------------------------------------------------------------------
+-- gembrowse-ui-text_field.ads
+--
+-- Render and handle input for editable text fields
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Ada.Strings.Unbounded;
 with Gembrowse.UI.State;
 

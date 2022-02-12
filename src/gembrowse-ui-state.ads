@@ -1,3 +1,14 @@
+-------------------------------------------------------------------------------
+-- gembrowse-ui-state.ads
+--
+-- In the Immediate Mode GUI paradigm, a minimal amount of state must still be 
+-- kept. Instead of duplicating application logic state and UI state and
+-- periodically syncing them, in IMGUI we let the application state directly
+-- influence the UI state and vice versa. However, there is still some UI state
+-- that needs to be kept between rendering+input passes. That's kept here.
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Ada.Containers.Vectors;
 with Ada.Real_Time;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
@@ -5,6 +16,7 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Colors;
 
 with Gembrowse.UI.Keys;
+with Gembrowse.UI.Types; use Gembrowse.UI.Types;
 
 package Gembrowse.UI.State is
 
@@ -59,6 +71,21 @@ package Gembrowse.UI.State is
     end record;
 
     ----------------------------------------------------------------------------
+    -- Error codes that may appear
+    ----------------------------------------------------------------------------
+    type Error_Code is (
+        NO_ERROR,
+        UNKNOWN_CONTROL_SEQUENCE,
+        UNKNOWN_SS3,
+        UNKNOWN_CSI,
+        UNKNOWN_CSI_1,
+        WANTED_TILDE,
+        MOUSE_COORD_TOO_BIG,
+        MOUSE_COORD_TOO_SMALL,
+        UNKNOWN_MOUSE_PRESS
+    );
+
+    ----------------------------------------------------------------------------
     -- UIState
     --
     -- Low-level state of the GUI for rendering and input handling
@@ -94,6 +121,8 @@ package Gembrowse.UI.State is
     --@field Word_Select is True if we just double-clicked to select a word,
     --  and future cursor drags with the mouse button held down should continue
     --  to select words.
+    --@field First_Draw_Index is the first character to start rendering within
+    --  a text field, if the text exceeds the display width of the text field.
     --@field Last_Blink is the time at which the cursor last switched from
     --  blinking to non-blinking.
     --@field Blink_On is True if the cursor is drawn, False otherwise.
@@ -108,45 +137,45 @@ package Gembrowse.UI.State is
     --@field Window_Height is the height of the window
     ---------------------------------------------------------------------------
     type UIState is record
-        -- Renderer        : SDL.Video.Renderers.Renderer;
-        Mouse_x         : Natural;
-        Mouse_y         : Natural;
-        Mouse_Down      : Boolean := False;
-        Double_Click    : Boolean := False;
-        Last_Click      : Ada.Real_Time.Time;
-        Mouse_Buttons   : Mouse_Button_State;
+        Mouse_x          : Screen_Coordinate;
+        Mouse_y          : Screen_Coordinate;
+        Mouse_Down       : Boolean := False;
+        Double_Click     : Boolean := False;
+        Last_Click       : Ada.Real_Time.Time;
+        Mouse_Buttons    : Mouse_Button_State;
 
-        Hot_Item        : ID;
-        Hot_Scope       : Scope_ID;
+        Hot_Item         : ID;
+        Hot_Scope        : Scope_ID;
 
-        Active_Item     : ID;
-        Active_Scope    : Scope_ID;
+        Active_Item      : ID;
+        Active_Scope     : Scope_ID;
 
-        Curr_Scope      : Scope_ID := NO_SCOPE;
-        Scope_X_Offset  : Natural := 0;
-        Scope_Y_Offset  : Natural := 0;
+        Curr_Scope       : Scope_ID := NO_SCOPE;
+        Scope_X_Offset   : Screen_Coordinate := 0;
+        Scope_Y_Offset   : Screen_Coordinate := 0;
 
-        Last_IDs        : Last_ID_List := (others => NO_ITEM);
+        Last_IDs         : Last_ID_List := (others => NO_ITEM);
 
-        Kbd_Item        : ID := NO_ITEM;
-        Kbd_Scope       : Scope_ID := NO_SCOPE;
+        Kbd_Item         : ID := NO_ITEM;
+        Kbd_Scope        : Scope_ID := NO_SCOPE;
 
-        Kbd_Pressed     : Gembrowse.UI.Keys.Key_Codes;
-        Kbd_Modifier    : Gembrowse.UI.Keys.Key_Modifiers;
-        Kbd_Heartbeat   : Boolean := False;
-        Kbd_Text        : Ada.Strings.Unbounded.Unbounded_String;
+        Kbd_Pressed      : Gembrowse.UI.Keys.Key_Codes;
+        Kbd_Modifier     : Gembrowse.UI.Keys.Key_Modifiers;
+        Kbd_Heartbeat    : Boolean := False;
+        Kbd_Text         : Ada.Strings.Unbounded.Unbounded_String;
 
-        Cursor_Pos      : Positive := 1;
-        Selection_Start : Positive := 1;
-        Selection_End   : Positive := 1;
-        Word_Select     : Boolean := False;
+        Cursor_Pos       : Positive := 1;
+        Selection_Start  : Positive := 1;
+        Selection_End    : Positive := 1;
+        Word_Select      : Boolean := False;
+        First_Draw_Index : Positive := 1;
 
         --Selection_Dir   : Select_Direction;
-        Last_Blink      : Ada.Real_Time.Time;
-        Blink_On        : Boolean := True;
+        Last_Blink       : Ada.Real_Time.Time;
+        Blink_On         : Boolean := True;
 
-        Last_Widget     : ID;
-        Last_Scope      : Scope_ID;
+        Last_Widget      : ID;
+        Last_Scope       : Scope_ID;
 
         Hover_Start     : Ada.Real_Time.Time;
         Tooltip         : Unbounded_String;
@@ -154,8 +183,11 @@ package Gembrowse.UI.State is
         Theme           : Colors.Theme;
         Done            : Boolean := False;
 
-        Window_Width    : Natural;
-        Window_Height   : Natural;
+        Window_Width    : Screen_Coordinate;
+        Window_Height   : Screen_Coordinate;
+
+        Error           : Error_Code := NO_ERROR;
+        Error_Msg       : Unbounded_String;
     end record
         with Dynamic_Predicate => (Cursor_Pos = Selection_Start or Cursor_Pos = Selection_End);
 

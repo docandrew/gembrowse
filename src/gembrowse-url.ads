@@ -1,7 +1,16 @@
+-------------------------------------------------------------------------------
+-- gembrowse-url.ads
+--
+-- URL parsing and transformation routines.
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Ada.Strings.Bounded; use Ada.Strings.Bounded;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 
 with Interfaces.C;
+
+pragma Elaborate (Ada.Strings.Bounded);
 
 package Gembrowse.URL with SPARK_Mode is
 
@@ -38,13 +47,28 @@ package Gembrowse.URL with SPARK_Mode is
     -- Gemini specifies a maximum URL length of 1024.
     package URLStrings is new Ada.Strings.Bounded.Generic_Bounded_Length (Max => 1024);
 
-    -- type URL is record
-    --     scheme   : URLStrings.Bounded_String;
-    --     user     : URLStrings.Bounded_String;
-    --     password : URLStrings.Bounded_String;
-    --     port     : Interfaces.C.unsigned_short;
+    subtype URLIndex is Natural range 0..URLStrings.Max_Length;
+
+    type URL is record
+        scheme   : URLStrings.Bounded_String;
+        user     : URLStrings.Bounded_String;
+        password : URLStrings.Bounded_String;
+        host     : URLStrings.Bounded_String;
+        port     : Interfaces.C.unsigned_short;
+        path     : URLStrings.Bounded_String;
+        query    : URLStrings.Bounded_String;
+    end record;
 
     -- function parseURL (urlstr : URLStrings.Bounded_String) return URL;
-    procedure parseURL (s : URLStrings.Bounded_String);
+    procedure parseURL (s : URLStrings.Bounded_String; u : out URL);
+
+    ---------------------------------------------------------------------------
+    -- percentEncode
+    --
+    -- percent-encode a string, so URI-reserved characters, control characters
+    -- and non-ASCII UTF-8 code points are converted to %xx where xx is the
+    -- hexadecimal value of that character.
+    ---------------------------------------------------------------------------
+    procedure percentEncode (s : in out Unbounded_String);
 
 end Gembrowse.URL;

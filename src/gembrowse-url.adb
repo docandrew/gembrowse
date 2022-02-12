@@ -1,3 +1,11 @@
+-------------------------------------------------------------------------------
+-- gembrowse-url.adb
+--
+-- URL parsing and transformation routines.
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
+with Ada.Text_IO;
 with Ada.Strings.Bounded; use Ada.Strings.Bounded;
 
 -------------------------------------------------------------------------------
@@ -68,10 +76,7 @@ package body Gembrowse.URL with SPARK_Mode is
     --     return isDigit (c) or c in 'a'..'f' or c in 'A'..'F';
     -- end isHexDigit;
 
-    -- ---------------------------------------------------------------------------
-    -- -- parseScheme
-    -- -- scheme ::= ALPHA *(ALPHA / DIGIT / "+" / "-" / ".")
-    -- ---------------------------------------------------------------------------
+
     -- function parseScheme (s : URLStrings.Bounded_String) return URLStrings.Bounded_String is
     -- begin
     --     null;
@@ -281,9 +286,75 @@ package body Gembrowse.URL with SPARK_Mode is
     --     -- parseFragment (s);
     -- end parseURL;
 
-    procedure parseURL (s : URLStrings.Bounded_String) is
+    ---------------------------------------------------------------------------
+    -- parseScheme
+    -- The scheme is mandatory, and ends when we encounter the first ":"
+    --
+    --  scheme ::= ALPHA *(ALPHA / DIGIT / "+" / "-" / ".")
+    -- ---------------------------------------------------------------------------    
+    procedure parseScheme (s : URLStrings.Bounded_String; u : in out URL; endScheme : out URLIndex) is
     begin
         null;
+    end parseScheme;
+
+    procedure parseURL (s : URLStrings.Bounded_String; u : out URL) is
+        newURL : URL := (
+                    scheme   => URLStrings.Null_Bounded_String,
+                    user     => URLStrings.Null_Bounded_String,
+                    password => URLStrings.Null_Bounded_String,
+                    host     => URLStrings.Null_Bounded_String,
+                    port     => 0,
+                    path     => URLStrings.Null_Bounded_String,
+                    query    => URLStrings.Null_Bounded_String);
+        
+        sliceIndex : URLIndex := 0;
+    begin
+        -- parseScheme (s, u, sliceIndex);
+        null;
     end parseURL;
+
+    ---------------------------------------------------------------------------
+    -- Reserved characters in URIs
+    ---------------------------------------------------------------------------
+    function isReserved (c : Character) return Boolean is
+    begin
+        case c is
+            when ':' | '/' | '?' | '#' | '[' | ']' | '@' | '!' | '$' | '&' | 
+                 ''' | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '%' | ' ' =>
+                return True;
+            when others =>
+                return False;
+        end case;
+    end isReserved;
+
+    ---------------------------------------------------------------------------
+    -- percentEncode
+    ---------------------------------------------------------------------------
+    procedure percentEncode (s : in out Unbounded_String) is
+        news : Unbounded_String := Null_Unbounded_String;
+        c : Character;
+
+        package ASCII_IO is new Ada.Text_IO.Integer_IO (Natural);
+    begin
+        for i in 1..s.Length loop
+            
+            c := s.Element (i);
+
+            if isReserved (c) or Character'Pos(c) < 32 or Character'Pos(c) > 126 then
+                declare
+                    asciiVal : String(1..6);
+                begin
+                    -- This is going to be 16#nn#, we just want nn so take
+                    -- the slice.
+                    ASCII_IO.Put (asciiVal, Character'Pos(c), 16);
+                    news.Append ("%" & asciiVal (4..5));
+                end;
+            else
+                news.Append (c);
+            end if;
+        end loop;
+
+        s := news;
+    end percentEncode;
 
 end Gembrowse.URL;

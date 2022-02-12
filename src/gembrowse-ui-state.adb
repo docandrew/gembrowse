@@ -1,3 +1,8 @@
+-------------------------------------------------------------------------------
+-- gembrowse-ui-state.adb
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Gembrowse.UI.Keys;
 
 package body Gembrowse.UI.State is

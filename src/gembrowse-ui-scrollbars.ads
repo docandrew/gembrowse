@@ -1,4 +1,10 @@
-
+-------------------------------------------------------------------------------
+-- gembrowse-ui-scrollbars.ads
+--
+-- Rendering and input for scrollbars.
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Gembrowse.UI.State;
 
 package Gembrowse.UI.Scrollbars is

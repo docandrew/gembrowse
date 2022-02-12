@@ -1,13 +1,20 @@
+-------------------------------------------------------------------------------
+-- tests.adb
+--
+-- Unit Tests
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Ada.Assertions;
 with Ada.Exceptions;
 with Ada.Text_IO; use Ada.Text_IO;
 with GNAT.Traceback.Symbolic;
 
-with Gembrowse.URL.IDNA; use Gembrowse.URL.IDNA;
+with Gembrowse.URL.Punycode;
 
 procedure Tests is
 begin
-    Gembrowse.URL.IDNA.runTests;
+    Gembrowse.URL.Punycode.runTests;
 
     Put_Line ("All tests ran successfully.");
 exception

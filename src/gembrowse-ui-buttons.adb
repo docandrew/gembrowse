@@ -1,3 +1,10 @@
+-------------------------------------------------------------------------------
+-- gembrowse-ui-buttons.adb
+--
+-- Button drawing & input handling.
+--
+-- Copyright 2022 Jon Andrew
+-------------------------------------------------------------------------------
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 
 with Gembrowse.UI.Input;
