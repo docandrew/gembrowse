@@ -42,7 +42,24 @@ package Gembrowse.URL with SPARK_Mode is
     PORT_TELNET     : constant := 23;
 
     -- IPv6 Address
-    -- Note some URL libraries handle zone IDs, however RFC 
+    -- Note some URL libraries handle zone IDs, however RFC
+
+    -- If a URL is malformed, this type is the reason why.
+    type ParseError is (
+        NONE,
+        BAD_SCHEME,
+        BAD_PCHAR,
+        EMPTY_SEGMENT,
+        BAD_SEGMENT_NZ,
+        BAD_ABSOLUTE_PATH,
+        BAD_USERINFO,
+        BAD_IPLITERAL,
+        BAD_IPVFUTURE,
+        BAD_IPV4ADDRESS,
+        BAD_PERCENT_ENCODING,
+        BAD_PORT,
+        BAD_HEXDIGIT
+    );
 
     -- Gemini specifies a maximum URL length of 1024.
     package URLStrings is new Ada.Strings.Bounded.Generic_Bounded_Length (Max => 1024);
@@ -50,16 +67,23 @@ package Gembrowse.URL with SPARK_Mode is
     subtype URLIndex is Natural range 0..URLStrings.Max_Length;
 
     type URL is record
-        scheme   : URLStrings.Bounded_String;
-        user     : URLStrings.Bounded_String;
-        password : URLStrings.Bounded_String;
-        host     : URLStrings.Bounded_String;
-        port     : Interfaces.C.unsigned_short;
-        path     : URLStrings.Bounded_String;
-        query    : URLStrings.Bounded_String;
+        scheme   : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
+        user     : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
+        password : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
+        host     : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
+        port     : Interfaces.C.unsigned_short  := 0;
+        path     : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
+        query    : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
+        error    : ParseError                   := NONE;
+        errorIdx : URLIndex                     := 0;
     end record;
 
-    -- function parseURL (urlstr : URLStrings.Bounded_String) return URL;
+    ---------------------------------------------------------------------------
+    -- parseURL
+    --
+    -- Given an unbounded string containing a URL, parse it into its
+    -- individual components.
+    ---------------------------------------------------------------------------
     procedure parseURL (s : URLStrings.Bounded_String; u : out URL);
 
     ---------------------------------------------------------------------------
@@ -70,5 +94,11 @@ package Gembrowse.URL with SPARK_Mode is
     -- hexadecimal value of that character.
     ---------------------------------------------------------------------------
     procedure percentEncode (s : in out Unbounded_String);
+
+    ---------------------------------------------------------------------------
+    -- runTests
+    -- Execute Unit Tests for this package.
+    ---------------------------------------------------------------------------
+    procedure runTests;
 
 end Gembrowse.URL;
