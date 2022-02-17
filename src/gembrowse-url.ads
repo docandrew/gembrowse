@@ -74,6 +74,7 @@ package Gembrowse.URL with SPARK_Mode is
         port     : Interfaces.C.unsigned_short  := 0;
         path     : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
         query    : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
+        fragment : URLStrings.Bounded_String    := URLStrings.Null_Bounded_String;
         error    : ParseError                   := NONE;
         errorIdx : URLIndex                     := 0;
     end record;
