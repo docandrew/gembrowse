@@ -50,10 +50,4 @@ package Gembrowse.URL.Punycode with SPARK_Mode is
                           output : out LabelStrings.Bounded_String;
                           result : out Boolean);
 
-
-    ---------------------------------------------------------------------------
-    -- Run test suite
-    ---------------------------------------------------------------------------
-    procedure runTests;
-
 end Gembrowse.URL.Punycode;

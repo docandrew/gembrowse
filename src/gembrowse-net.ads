@@ -30,6 +30,7 @@ package Gembrowse.net is
 
     procedure setup;
     procedure teardown;
-    function fetchPage (url : Unbounded_String; page : out Unbounded_String) return Boolean;
+    function fetchPage (urlstr : Unbounded_String; 
+                        page   : out Unbounded_String) return Boolean;
 
 end Gembrowse.net;

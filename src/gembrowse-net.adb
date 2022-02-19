@@ -12,11 +12,18 @@ with GNAT.OS_Lib;
 with tls; use tls;
 
 with Console;
+with Gembrowse.URL;
 
 package body Gembrowse.Net is
     
     tlsConfig : access tls_config;
 
+    ---------------------------------------------------------------------------
+    -- setup
+    --
+    -- Configure root CA store and initialize libtls structs. We'll reuse
+    -- the tlsConfig structure throughout the browser lifecycle.
+    ---------------------------------------------------------------------------
     procedure setup is
         rootCAPath : constant String := "/etc/ssl/certs";
         rootCAPathPtr : Interfaces.C.Strings.chars_ptr := New_String (rootCAPath);
@@ -52,125 +59,144 @@ package body Gembrowse.Net is
         Free (rootCAPathPtr);
     end setup;
 
+    ---------------------------------------------------------------------------
+    -- teardown
+    -- free libtls structs
+    ---------------------------------------------------------------------------
     procedure teardown is
     begin
         tls_config_free (tlsConfig);
     end teardown;
 
-    -- function percentEncode (term : Unbounded_String) return Unbounded_String is
-
-    -- begin
-    --     for i in 1..Length (term) loop
-    --         if not urlAllowed (Element (term, i)) then
-    --         end if;
-    --     end loop;
-    -- end percentEncode;
-
     ---------------------------------------------------------------------------
     -- fetchPage
     ---------------------------------------------------------------------------
-    function fetchPage (url       : Unbounded_String;
-                        page      : out Unbounded_String) return Boolean is
+    function fetchPage (urlstr : Unbounded_String;
+                        page   : out Unbounded_String) return Boolean is
+
+        use Gembrowse.URL;
 
         CRLF : constant String := ASCII.CR & ASCII.LF;
 
-        fqdn : constant String := "localhost";
-        fqdnPtr : Interfaces.C.Strings.chars_ptr := New_String (fqdn);
+        fixedURL   : constant String := urlstr.To_String;
+        boundedURL : URLStrings.Bounded_String := URLStrings.To_Bounded_String (fixedURL);
+        parsedURL  : Gembrowse.URL.URL;
 
-        -- url : constant String := "gemini://localhost/";
-
-        port : constant String := "1965";
-        portPtr : Interfaces.C.Strings.chars_ptr := New_String (port);
+        -- fqdn : constant String := To_String (parsedURL.host);
+        fqdnPtr : Interfaces.C.Strings.chars_ptr; --:= New_String (fqdn);
+        portPtr : Interfaces.C.Strings.chars_ptr; --:= New_String (parsedURL.port'Image);
 
         writeLen : Interfaces.C.long;
-        sendBuf : constant String := To_String (url) & CRLF;
+        sendBuf : constant String := urlstr.To_String & CRLF;
 
-        readLen : Interfaces.C.long;    
+        readLen : Interfaces.C.long;
+        bytesRead : Interfaces.C.long := 0;
+
         type Buffer is array (Natural range 1..32768) of Character;
         recvBuf : Buffer := (others => ASCII.NUL);
 
         tlsContext : access tls.tls;
     begin
+        page      := Null_Unbounded_String;
+        Gembrowse.URL.parseURL (boundedURL, parsedURL);
+
+        if parsedURL.error /= NONE then
+            return False;
+        end if;
+
+        Put_Line (Standard_Error, "Attempting to connect to " & To_String (urlstr));
+
+        fqdnPtr := New_String (URLStrings.To_String (parsedURL.host));
+        portPtr := New_String (parsedURL.port'Image);
+
+        Put_Line (Standard_Error, "Connecting to " & URLStrings.To_String (parsedURL.host) & " port" & parsedURL.port'Image);
 
         -- init client context
         tlsContext := tls_client;
 
         if tlsContext = null then
-            Console.Error ("Fatal: tls_client");
-            -- GNAT.OS_Lib.OS_Exit (5);
+            Put_Line (Standard_Error, "Fatal: tls_client");
+            Free (portPtr);
+            Free (fqdnPtr);
             return False;
         end if;
 
         -- apply config to context
         if tls_configure (tlsContext, tlsConfig) /= 0 then
-            Console.Error ("Fatal: tls_configure (" & Value (tls_error (tlsContext)) & ")");
-            -- GNAT.OS_Lib.OS_Exit (6);
+            -- Console.Error ("Fatal: tls_configure (" & Value (tls_error (tlsContext)) & ")");
+            Put_Line (Standard_Error, "Fatal: tls_configure (" & Value (tls_error (tlsContext)) & ")");
+            Free (portPtr);
+            Free (fqdnPtr);
             return False;
         end if;
 
         -- Connect to server
         if tls_connect (tlsContext, fqdnPtr, portPtr) /= 0 then
-            Console.Error ("Fatal: tls_connect (" & Value (tls_error (tlsContext)) & ")");
-            -- GNAT.OS_Lib.OS_Exit (7);
+            Put_Line (Standard_Error, "Fatal: tls_connect (" & Value (tls_error (tlsContext)) & ")");
+            Free (portPtr);
+            Free (fqdnPtr);
             return False;
         end if;
 
         -- Confirm handshake success
         if tls_handshake (tlsContext) /= 0 then
-            Console.Error ("Fatal: tls_handshake (" & Value (tls_error (tlsContext)) & ")");
-            -- GNAT.OS_Lib.OS_Exit (8);
+            Put_Line (Standard_Error, "Fatal: tls_handshake (" & Value (tls_error (tlsContext)) & ")");
+            Free (portPtr);
+            Free (fqdnPtr);
             return False;
         end if;
 
         -- send request
+        -- @TODO wrap this in a loop in case everything didn't get sent.
         writeLen := tls_write (tlsContext, sendBuf(1)'Address, sendBuf'Length);
 
         if writeLen < 0 then
-            Console.Error ("Fatal: tls_write (" & Value (tls_error (tlsContext)) & ")");
-            -- GNAT.OS_Lib.OS_Exit (9);
+            Put_Line (Standard_Error, "Fatal: tls_write (" & Value (tls_error (tlsContext)) & ")");
+            Free (portPtr);
+            Free (fqdnPtr);
             return False;
-        else
-            Console.Heading ("Wrote" & writeLen'Image & " bytes");
         end if;
 
-        -- receive header
-        -- readLoop: loop
+        -- receive page. We'll copy the buffer each time.
+        -- It seems that sometimes a server will send the response such that
+        -- the first tls_read will only get the header, and the second will get
+        -- the body, other times we get everything on the first tls_read.
+        readLoop: loop
+            Put_Line (Standard_Error, "attempt tls_read");
             readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
 
-            -- if readLen = TLS_WANT_POLLIN or readLen = TLS_WANT_POLLOUT then
-            --     goto readLoop;
-            -- elsif readLen = -1 then
+            if readLen = TLS_WANT_POLLIN or readLen = TLS_WANT_POLLOUT then
+                -- Put_Line (Standard_Error, "TLS_WANT");
+                null;   -- continue
+            elsif readLen = -1 then
+                -- Put_Line (Standard_Error, "read -1");
+                exit readLoop;
+            elsif readLen = 0 then
+                -- Put_Line (Standard_Error, "read 0");
+                exit readLoop;
+            else
+                -- Put_Line (Standard_Error, "read" & readLen'Image);
+                bytesRead := bytesRead + readLen;
 
-        -- end loop;
+                --@TODO probably a nicer way to do this with slicing. Consider
+                -- making recvBuf a Bounded_String and explicitly setting
+                -- length.
+                for i in 1 .. Integer(readLen) loop
+                    Put (Standard_Error, recvBuf (i));
+                    Append (page, recvBuf (i));
+                end loop;
+            end if;
+        end loop readLoop;
 
-        -- Put_Line ("Received" & readLen'Image & " bytes");
-
-        -- if readLen < 0 then
-        --     Console.Error ("Fatal: tls_read (" & Value (tls_error (tlsContext)) & ")");
-        -- end if;
-        -- for i in 1..Integer(readLen) loop
-        --     Put (recvBuf(i));
-        -- end loop;
-
-        -- receive body
-        readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
-        
-        -- Put_Line ("Received" & readLen'Image & " bytes");
-
-        -- if readLen < 0 then
-        --     Console.Error ("Fatal: tls_read (" & Value (tls_error (tlsContext)) & ")");
-        -- end if;
-        page := Null_Unbounded_String;
-
-        for i in 1..Integer(readLen) loop
-            -- Put (recvBuf(i));
-            Append (page, recvBuf(i));
-        end loop;
+        Put_Line (Standard_Error, "Received" & bytesRead'Image & " bytes");
+        Put_Line (Standard_Error, "Received " & To_String (page));
 
         -- cleanup
 
         if tls_close (tlsContext) /= 0 then
-            -- Console.Error ("Fatal: tls_close (" & Value (tls_error (tlsContext)) & ")");
+            Put_Line (Standard_Error, "Fatal: tls_close (" & Value (tls_error (tlsContext)) & ")");
+            Free (portPtr);
+            Free (fqdnPtr);
             return False;
         end if;
 

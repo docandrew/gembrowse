@@ -272,7 +272,7 @@ package body Gembrowse.UI is
 
         -- we don't want to mess with the actual URL, if a user had a long search
         -- term we should preserve their spaces in the url variable.
-        actualURL : Unbounded_String;
+        actualURL : Unbounded_String := Null_Unbounded_String;
     begin
         if url.Length = 0 then
             return;
@@ -294,6 +294,8 @@ package body Gembrowse.UI is
         elsif Index (url, "file://", 1) = 1 then
             -- try to load local file (only work with .gmi)
             null;
+        else
+            actualURL := url;
         end if;
 
         GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (actualURL));

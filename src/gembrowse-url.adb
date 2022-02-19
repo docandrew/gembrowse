@@ -341,7 +341,7 @@ package body Gembrowse.URL with SPARK_Mode is
 
             newURL.scheme.Append (getNext);
 
-            for i in 2..s.Length loop
+            while idx <= s.Length loop
                 c := peekNext;
 
                 if c = ':' then
@@ -353,7 +353,7 @@ package body Gembrowse.URL with SPARK_Mode is
                     -- are an error.
                     if not isSchemeChar (c) then
                         newURL.error    := BAD_SCHEME;
-                        newURL.errorIdx := i;
+                        newURL.errorIdx := idx;
                         newURL.scheme   := URLStrings.Null_Bounded_String;
                         return;
                     else
@@ -361,6 +361,12 @@ package body Gembrowse.URL with SPARK_Mode is
                     end if;
                 end if;
             end loop;
+
+            -- If we get to this point, then we reached the end of the "URL"
+            -- without having gotten a scheme. No scheme? No URL.
+            newURL.error    := NO_SCHEME;
+            newURL.errorIdx := idx;
+            newURL.scheme   := URLStrings.Null_Bounded_String;
         end parseScheme;
 
         -----------------------------------------------------------------------
@@ -852,6 +858,8 @@ package body Gembrowse.URL with SPARK_Mode is
             subtype NatDigit is Natural range 0..9;
             type ShiftRegister is array (Positive range 1..5) of NatDigit;
             shiftReg : ShiftRegister := (others => 0);
+
+            val : Natural;
         begin
             if newURL.error /= NONE or idx > s.Length then
                 return;
@@ -867,21 +875,22 @@ package body Gembrowse.URL with SPARK_Mode is
                 shiftReg(5) := NatDigit'Value ("" & getNext);
             end loop;
 
+            val := shiftReg(1) * 10000 +
+                   shiftReg(2) * 1000 +
+                   shiftReg(3) * 100 +
+                   shiftReg(4) * 10 +
+                   shiftReg(5);
+
             -- Perform validation. This parser considers it an error if the
             -- port range exceeds 65535. So if the first 5 digits we parse are
             -- more than 65535, or if we see a 6th digit, then flag
             -- the whole thing as an error.
-            if shiftReg(1) * 10000 + 
-               shiftReg(2) * 1000 +
-               shiftReg(3) * 100 +
-               shiftReg(4) * 10 +
-               shiftReg(5) > 65535 or 
-               (idx <= s.Length and then isDigit(peekNext)) then
-
+            if val > 65535 or (idx <= s.Length and then isDigit(peekNext)) then
                 newURL.error    := BAD_PORT;
                 newURL.errorIdx := idx;
                 newURL.port     := 0;
-
+            else
+                newURL.port := Interfaces.C.unsigned_short(val);
             end if;
         end parsePort;
 
@@ -890,6 +899,7 @@ package body Gembrowse.URL with SPARK_Mode is
         -- authority := [ userinfo "@" ] host [":" port]
         -----------------------------------------------------------------------
         procedure parseAuthority is
+            ignore : Character;
         begin
             if newURL.error /= NONE or idx > s.Length then
                 return;
@@ -904,6 +914,7 @@ package body Gembrowse.URL with SPARK_Mode is
             parseHost;
 
             if idx <= s.Length and then peekNext = ':' then
+                ignore := getNext;      -- consume ':'
                 parsePort;
             end if;
         end parseAuthority;
@@ -919,7 +930,6 @@ package body Gembrowse.URL with SPARK_Mode is
             c : Character;
         begin
             if newURL.error /= NONE or idx > s.Length then
-                Ada.Text_IO.Put_Line ("A");
                 return;
             end if;
 
@@ -943,34 +953,136 @@ package body Gembrowse.URL with SPARK_Mode is
         end parseHierPart;
 
         -----------------------------------------------------------------------
+        -- parseQueryOrFragment
+        -- The ABNF for queries and fragments is the same, so we can reuse
+        -- this procedure for both but just append to a different place.
+        -----------------------------------------------------------------------
+        procedure parseQueryOrFragment (qf : in out URLStrings.Bounded_String) is
+            c      : Character;
+            valid  : Boolean;
+        begin
+            loop
+                exit when idx > s.Length or newURL.error /= NONE;
+                
+                if isPchar (peekNext) or peekNext = '%' then
+                    getNextPChar (c, valid);
+
+                    if valid then
+                        qf.Append (c);
+                    else
+                        newURL.error    := BAD_PCHAR;
+                        newURL.errorIdx := idx;
+                        newURL.path     := URLStrings.Null_Bounded_String;
+                    end if;
+                elsif peekNext = '/' or peekNext = '?' then
+                    qf.Append (getNext);
+                else
+                    -- if the next character is not a pchar, '/' or '?' then
+                    -- we're done with the query
+                    return;
+                end if;
+            end loop;
+        end parseQueryOrFragment;
+
+        -----------------------------------------------------------------------
         -- parseQuery
+        -- query := *( pchar / "/" / "?")
         -----------------------------------------------------------------------
         procedure parseQuery is
+            ignore : Character;
         begin
-            null;
+            if newURL.error /= NONE or idx > s.Length then
+                return;
+            end if;
+
+            if peekNext = '?' then
+                -- we have a query
+                ignore := getNext;      -- consume '?'
+            end if;
+
+            parseQueryOrFragment (newURL.query);
         end parseQuery;
 
         -----------------------------------------------------------------------
         -- parseFragment
+        -- fragment := *( pchar / "/" / "?")
         -----------------------------------------------------------------------
         procedure parseFragment is
+            ignore : Character;
         begin
-            null;
+            if newURL.error /= NONE or idx > s.Length then
+                return;
+            end if;
+
+            if peekNext = '#' then
+                -- we have a fragment
+                ignore := getNext;      -- consume '#'
+            end if;
+
+            parseQueryOrFragment (newURL.fragment);
         end parseFragment;
 
-    -- actual meat of parseURL
+        -----------------------------------------------------------------------
+        -- tryPortLookup
+        -- If a port isn't explicitly given in the URL string we were passed,
+        -- but we have a scheme that maps to a well-known port, go ahead and
+        -- put the IANA port here. This is for _convenience_, and should not
+        -- be used blindly. 
+        -----------------------------------------------------------------------
+        procedure tryPortLookup (pu : in out URL) is
+            use Interfaces.C;
+        begin
+            if pu.error /= NONE or pu.port /= 0 then
+                return;
+            end if;
+
+            if pu.scheme.To_String = "finger" then
+                pu.port := PORT_FINGER;
+            elsif pu.scheme.To_String = "ftp" then
+                pu.port := PORT_FTP;
+            elsif pu.scheme.To_String = "ftps" then
+                pu.port := PORT_FTPS;
+            elsif pu.scheme.To_String = "http" then
+                pu.port := PORT_HTTP;
+            elsif pu.scheme.To_String = "https" then
+                pu.port := PORT_HTTPS;
+            elsif pu.scheme.To_String = "gopher" then
+                pu.port := PORT_GOPHER;
+            elsif pu.scheme.To_String = "gemini" then
+                pu.port := PORT_GEMINI;
+            elsif pu.scheme.To_String = "imap" then
+                pu.port := PORT_IMAP;
+            elsif pu.scheme.To_String = "pop" then
+                pu.port := PORT_POP;
+            elsif pu.scheme.To_String = "rsync" then
+                pu.port := PORT_RSYNC;
+            elsif pu.scheme.To_String = "sftp" then
+                pu.port := PORT_SFTP;
+            elsif pu.scheme.To_String = "smtp" then
+                pu.port := PORT_SMTP;
+            elsif pu.scheme.To_String = "snmp" then
+                pu.port := PORT_SNMP;
+            elsif pu.scheme.To_String = "ssh" then
+                pu.port := PORT_SSH;
+            elsif pu.scheme.To_String = "telnet" then
+                pu.port := PORT_TELNET;
+            elsif pu.scheme.To_String = "tftp" then
+                pu.port := PORT_TFTP;
+            else
+                null;
+            end if;
+        end tryPortLookup;
+
+    ---------------------------------------------------------------------------
+    -- parseURL body
+    ---------------------------------------------------------------------------
     begin
         parseScheme;
-
         parseHierPart;
+        parseQuery;
+        parseFragment;
 
-        if idx < s.Length and then peekNext = '?' then
-            parseQuery;
-        end if;
-
-        if idx < s.Length and then peekNext = '#' then
-            parseFragment;
-        end if;
+        tryPortLookup (newURL);
 
         u := newURL;
     end parseURL;
@@ -1019,210 +1131,5 @@ package body Gembrowse.URL with SPARK_Mode is
 
         s := news;
     end percentEncode;
-
-    ---------------------------------------------------------------------------
-    -- runTests
-    --
-    -- Unit testing suite for URL parsing subprograms.
-    ---------------------------------------------------------------------------
-    procedure runTests with SPARK_Mode => Off is
-
-        use Ada.Assertions;
-        use Ada.Strings.Unbounded;
-
-        -----------------------------------------------------------------------
-        -- testPercentEncode
-        -----------------------------------------------------------------------
-        procedure testPercentEncode is
-            type PercentEncodeTestCase is record
-                modified : Unbounded_String;
-                expected : Unbounded_String;
-            end record;
-            
-            type PercentEncodeTestCases is array (Natural range 1..2) of PercentEncodeTestCase;
-
-            testCases : PercentEncodeTestCases := (
-                (To_Unbounded_String ("Hello Günter"),                           To_Unbounded_String ("Hello%20G%C3%BCnter")),
-                (To_Unbounded_String ("all % * special [] chars ' are encoded"), To_Unbounded_String ("all%20%25%20%2A%20special%20%5B%5D%20chars%20%27%20are%20encoded"))
-            );
-        begin
-            
-            for tc of testCases loop
-                percentEncode (tc.modified);
-                assert (tc.modified.To_String = tc.expected.To_String, "percentEncode() properly converts non-URL characters to %xx digits");
-            end loop;
-
-        end testPercentEncode;
-
-        -----------------------------------------------------------------------
-        -- testParseURL
-        -----------------------------------------------------------------------
-        procedure testParseURL is
-            type ParseURLTestCase is record
-                text     : URLStrings.Bounded_String;
-                expected : URL;
-                testMsg  : Unbounded_String;
-            end record;
-
-            type ParseURLTestCases is array (Natural range <>) of ParseURLTestCase;
-
-            testCases : ParseURLTestCases := (
-                ---------------------------------------------------------------
-                -- Scheme parsing
-                ---------------------------------------------------------------
-                (
-                    text => URLStrings.To_Bounded_String ("gemini://asdf.com"),
-                    expected => (
-                        scheme   => URLStrings.To_Bounded_String ("gemini"),
-                        host     => URLStrings.To_Bounded_String ("asdf.com"),
-                        error    => NONE,
-                        -- port     => 0,
-                        -- errorIdx => 0,
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("1. scheme is parsed correctly")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("1bad://url.com"),
-                    expected => (
-                        scheme   => URLStrings.Null_Bounded_String,
-                        error    => BAD_SCHEME,
-                        errorIdx => 1,
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("2. schemes must start with ALPHA")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("as%df://host.org"),
-                    expected => (
-                        scheme => URLStrings.Null_Bounded_String,
-                        error => BAD_SCHEME,
-                        errorIdx => 3,
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("3. schemes must be only ALPHA / DIGIT / '+' / '-' / '.'")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("a1s+df-foo.bar://host.org"),
-                    expected => (
-                        scheme => URLStrings.To_Bounded_String ("a1s+df-foo.bar"),
-                        error  => NONE,
-                        host   => URLStrings.To_Bounded_String ("host.org"),
-                        others => <>
-                    ),
-                    testMsg => To_Unbounded_String ("4. schemes can contain ALPHA / DIGIT / '+' / '-' / '.'")
-                ),
-                ---------------------------------------------------------------
-                -- Userinfo parsing
-                ---------------------------------------------------------------
-                (
-                    text => URLStrings.To_Bounded_String ("https://jim:beam@host.org"),
-                    expected => (
-                        scheme   => URLStrings.To_Bounded_String ("https"),
-                        user     => URLStrings.To_Bounded_String ("jim"),
-                        password => URLStrings.To_Bounded_String ("beam"),
-                        host     => URLStrings.To_Bounded_String ("host.org"),
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("5. User info with a single semicolon is parsed properly.")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("weird://ji:m:be:am@host.org"),
-                    expected => (
-                        scheme   => URLStrings.To_Bounded_String ("weird"),
-                        user     => URLStrings.To_Bounded_String ("ji:m:be:am"),
-                        host     => URLStrings.To_Bounded_String ("host.org"),
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("6. User info for strange schemes with multiple semicolons is parsed into the 'user' field.")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("http://steve:this%6Ehere@host.org"),
-                    expected => (
-                        scheme   => URLStrings.To_Bounded_String ("http"),
-                        user     => URLStrings.To_Bounded_String ("steve"),
-                        password => URLStrings.To_Bounded_String ("thisnhere"),
-                        host     => URLStrings.To_Bounded_String ("host.org"),
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("7. Embedded percent-encoded characters are OK in the userinfo (1)")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("http://steve:this%6ehere@host.org"),
-                    expected => (
-                        scheme   => URLStrings.To_Bounded_String ("http"),
-                        user     => URLStrings.To_Bounded_String ("steve"),
-                        password => URLStrings.To_Bounded_String ("thisnhere"),
-                        host     => URLStrings.To_Bounded_String ("host.org"),
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("8. Embedded percent-encoded characters are OK in the userinfo (2)")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("http://steve:pw%2here@host.org"),
-                    expected => (
-                        scheme   => URLStrings.To_Bounded_String ("http"),
-                        error    => BAD_PERCENT_ENCODING,
-                        errorIdx => 19,
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("9. Incorrect percent encoded characters are caught (1)")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("http://%1steve:pw@host.org"),
-                    expected => (
-                        scheme   => URLStrings.To_Bounded_String ("http"),
-                        error    => BAD_PERCENT_ENCODING,
-                        errorIdx => 11,
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("10. Incorrect percent encoded characters are caught (2)")
-                ),
-                (
-                    text => URLStrings.To_Bounded_String ("http://steve:pw%A@host.org"),
-                    expected => (
-                        scheme   => URLStrings.To_Bounded_String ("http"),
-                        error    => BAD_PERCENT_ENCODING,
-                        errorIdx => 19,
-                        others   => <>
-                    ),
-                    testMsg => To_Unbounded_String ("11. Incorrect percent encoded characters are caught (3)")
-                )
-            );
-
-        begin
-            for tc of testCases loop
-                declare
-                    u : URL;
-                    use Ada.Text_IO;
-                    package ParseErrorIO is new Ada.Text_IO.Enumeration_IO (ParseError);
-                begin
-                    parseURL (tc.text, u);
-
-                    Put_Line ("");
-                    Put ("Input:     " & URLStrings.To_String (tc.text) & ASCII.LF &
-                         "-----------------------------------------------------" & ASCII.LF &
-                         "scheme:    " & URLStrings.To_String (u.scheme) & ASCII.LF &
-                         "user:      " & URLStrings.To_String (u.user) & ASCII.LF &
-                         "password:  " & URLStrings.To_String (u.password) & ASCII.LF &
-                         "host:      " & URLStrings.To_String (u.host) & ASCII.LF &
-                         "port:     "  & u.port'Image & ASCII.LF &
-                         "path:      " & URLStrings.To_String (u.path) & ASCII.LF &
-                         "query:     " & URLStrings.To_String (u.query) & ASCII.LF &
-                         "fragment:  " & URLStrings.To_String (u.fragment) & ASCII.LF &
-                         "error:     ");
-                    ParseErrorIO.Put (u.error);
-                    Put_Line ("");
-                    Put_Line ("errorIdx: " & u.errorIdx'Image);
-
-                    assert (u = tc.expected, To_String (tc.testMsg));
-                end;
-            end loop;
-        end testParseURL;
-
-    begin
-        testPercentEncode;
-        testParseURL;
-    end runTests;
 
 end Gembrowse.URL;

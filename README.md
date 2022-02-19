@@ -34,7 +34,8 @@ I like Nerd Fonts for my terminal:
 
 https://www.nerdfonts.com/
 
-Gembrowse makes use of emojis, but no Font Awesome icons or anything like that.
+Gembrowse makes use of emojis, but no Font Awesome icons or Powerline symbols
+or anything like that.
 
 ## Bookmarks File
 

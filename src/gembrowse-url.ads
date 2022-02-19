@@ -3,6 +3,10 @@
 --
 -- URL parsing and transformation routines.
 --
+-- Intended to be compliant with RFC-3986, with the exception of ports. This
+-- parser considers port numbers greater than 65535 (or any port string longer 
+-- than 5 digits) to be an error.
+--
 -- Copyright 2022 Jon Andrew
 -------------------------------------------------------------------------------
 with Ada.Strings.Bounded; use Ada.Strings.Bounded;
@@ -27,8 +31,9 @@ package Gembrowse.URL with SPARK_Mode is
     -- This list is not exhaustive, and these numbers are provided for
     -- convenience for code which wishes to use the port field of the URL type
     -- when a port isn't otherwise explicitly given.
-    --
+    PORT_FINGER     : constant := 79;
     PORT_FTP        : constant := 21;
+    PORT_FTPS       : constant := 990;
     PORT_GEMINI     : constant := 1965;
     PORT_GOPHER     : constant := 70;
     PORT_HTTP       : constant := 80;
@@ -38,8 +43,10 @@ package Gembrowse.URL with SPARK_Mode is
     PORT_RSYNC      : constant := 873;
     PORT_SFTP       : constant := 115;
     PORT_SMTP       : constant := 587;
+    PORT_SNMP       : constant := 161;
     PORT_SSH        : constant := 22;
     PORT_TELNET     : constant := 23;
+    PORT_TFTP       : constant := 69;
 
     -- IPv6 Address
     -- Note some URL libraries handle zone IDs, however RFC
@@ -47,6 +54,7 @@ package Gembrowse.URL with SPARK_Mode is
     -- If a URL is malformed, this type is the reason why.
     type ParseError is (
         NONE,
+        NO_SCHEME,
         BAD_SCHEME,
         BAD_PCHAR,
         EMPTY_SEGMENT,
@@ -95,11 +103,5 @@ package Gembrowse.URL with SPARK_Mode is
     -- hexadecimal value of that character.
     ---------------------------------------------------------------------------
     procedure percentEncode (s : in out Unbounded_String);
-
-    ---------------------------------------------------------------------------
-    -- runTests
-    -- Execute Unit Tests for this package.
-    ---------------------------------------------------------------------------
-    procedure runTests;
 
 end Gembrowse.URL;
