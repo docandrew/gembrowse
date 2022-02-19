@@ -28,7 +28,6 @@ package body Gembrowse.Bookmarks is
     -- useBookmarkFile
     ---------------------------------------------------------------------------
     procedure useBookmarkFile (path : String) is
-        c : Character;
     begin
         bookmarkFilepath := To_Bounded_String (path);
 
@@ -37,8 +36,7 @@ package body Gembrowse.Bookmarks is
         bookmarkFile.Open (In_File, To_String (bookmarkFilepath));
 
         while not End_Of_File (bookmarkFile) loop
-            bookmarkFile.Get (c);
-            Append (bookmarks, c);
+            Append (bookmarks, bookmarkFile.Get_Line);
         end loop;
 
         useBookmarks := True;
@@ -53,6 +51,14 @@ package body Gembrowse.Bookmarks is
             useBookmarks := True;
             bookmarkFile.Close;
     end useBookmarkFile;
+
+    ---------------------------------------------------------------------------
+    -- getBookmarkPath
+    ---------------------------------------------------------------------------
+    function getBookmarkPath return String is
+    begin
+        return To_String(bookmarkFilepath);
+    end getBookmarkPath;
 
     ---------------------------------------------------------------------------
     -- addBookmark

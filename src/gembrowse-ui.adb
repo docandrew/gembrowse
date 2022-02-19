@@ -27,14 +27,17 @@ with Colors;
 with Console;
 with Util;
 
+with Gembrowse.Bookmarks;
+with Gembrowse.File;
 with Gembrowse.Net; use Gembrowse.Net;
+
 with Gembrowse.UI.Buttons; use Gembrowse.UI.Buttons;
 with Gembrowse.UI.Input; use Gembrowse.UI.Input;
 with Gembrowse.UI.Keys;
 with Gembrowse.UI.State; use Gembrowse.UI.State;
--- with Gembrowse.UI.Tab_Bar;
 with Gembrowse.UI.Scrollbars; use Gembrowse.UI.Scrollbars;
 with Gembrowse.UI.Text_Field; use Gembrowse.UI.Text_Field;
+
 with Gembrowse.URL;
 
 package body Gembrowse.UI is
@@ -92,6 +95,9 @@ package body Gembrowse.UI is
             "* Written in Ada" & ASCII.LF &
             "* Mouse and Keyboard Friendly" & ASCII.LF &
             ASCII.LF &
+            "###    Bookmarks" & ASCII.LF &
+            "=> file://" & Gembrowse.Bookmarks.getBookmarkPath & " Bookmarks" & ASCII.LF &
+            ASCII.LF &
             "###    Links" & ASCII.LF &
             ASCII.LF &
             "=> gemini://docandrew.com/gembrowse Homepage" & ASCII.LF &
@@ -110,7 +116,6 @@ package body Gembrowse.UI is
     begin
         tabs.Append (newState);
         
-        -- @TODO highlight whole address bar without having to click,
         highlightAddressBar := True;
 
         switchTab (st, tabs.Last_Index);
@@ -264,7 +269,7 @@ package body Gembrowse.UI is
     ---------------------------------------------------------------------------
     -- loadPage
     -- Given an address, load that page into the active tab.
-    -- @TODO push previous page to history
+    -- @TODO push previous page to history on successful load
     -- @TODO determine bookmark status
     ---------------------------------------------------------------------------
     procedure loadPage (st : in out Gembrowse.UI.State.UIState; url : in out Unbounded_String) is
@@ -280,20 +285,21 @@ package body Gembrowse.UI is
 
         clearPage (st);
 
-        -- Take a look at the URL. First, it needs to be < 1024 chars
-
+        -- Take a look at the URL.
+        -- @TODO enforce length < 1024
         if Index (url, " ", 1) /= 0 then
             -- If it has spaces, it's a search term.
             searchTerm := url;
             Gembrowse.URL.percentEncode (searchTerm);
             actualURL := To_Unbounded_String ("gemini://geminispace.info/search?" & To_String (searchTerm));
-
+        elsif Index (url, "file:", 1) = 1 then
+            -- try to load local file
+            actualURL := url;
+            Gembrowse.File.loadLocalFile (To_String (url), tabs(activeTab).pageContents);
+            return;
         elsif Index (url, "gemini://") /= 1 then
             -- If it starts with gemini://, great. If not, insert that (keep in mind 1024 char limit).
             actualURL := To_Unbounded_String ("gemini://" & To_String (url));
-        elsif Index (url, "file://", 1) = 1 then
-            -- try to load local file (only work with .gmi)
-            null;
         else
             actualURL := url;
         end if;

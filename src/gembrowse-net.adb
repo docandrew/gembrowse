@@ -158,9 +158,10 @@ package body Gembrowse.Net is
         end if;
 
         -- receive page. We'll copy the buffer each time.
-        -- It seems that sometimes a server will send the response such that
+        -- It seems that some servers will send the response such that
         -- the first tls_read will only get the header, and the second will get
-        -- the body, other times we get everything on the first tls_read.
+        -- the body, other times we get everything on the first tls_read. Here
+        -- we'll just keep reading while it has something to send.
         readLoop: loop
             Put_Line (Standard_Error, "attempt tls_read");
             readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
@@ -178,9 +179,6 @@ package body Gembrowse.Net is
                 -- Put_Line (Standard_Error, "read" & readLen'Image);
                 bytesRead := bytesRead + readLen;
 
-                --@TODO probably a nicer way to do this with slicing. Consider
-                -- making recvBuf a Bounded_String and explicitly setting
-                -- length.
                 for i in 1 .. Integer(readLen) loop
                     Put (Standard_Error, recvBuf (i));
                     Append (page, recvBuf (i));
@@ -188,16 +186,15 @@ package body Gembrowse.Net is
             end if;
         end loop readLoop;
 
-        Put_Line (Standard_Error, "Received" & bytesRead'Image & " bytes");
-        Put_Line (Standard_Error, "Received " & To_String (page));
+        -- Put_Line (Standard_Error, "Received" & bytesRead'Image & " bytes");
+        -- Put_Line (Standard_Error, "Received " & To_String (page));
 
         -- cleanup
 
+        -- Some servers have an issue with the tls_close without EOF notify (?)
+        -- We'll ignore it.
         if tls_close (tlsContext) /= 0 then
-            Put_Line (Standard_Error, "Fatal: tls_close (" & Value (tls_error (tlsContext)) & ")");
-            Free (portPtr);
-            Free (fqdnPtr);
-            return False;
+            Put_Line (Standard_Error, "Warning: tls_close (" & Value (tls_error (tlsContext)) & ")");
         end if;
 
         tls_free (tlsContext);

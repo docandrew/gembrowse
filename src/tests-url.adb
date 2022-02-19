@@ -303,6 +303,16 @@ package body Tests.URL is
                 ---------------------------------------------------------------
                 -- Paths
                 ---------------------------------------------------------------
+                (
+                    text => URLStrings.To_Bounded_String ("file://somefolder/somefile.txt"),
+                    expected => (
+                        scheme   => URLStrings.To_Bounded_String ("file"),
+                        host     => URLStrings.To_Bounded_String ("somefolder"),
+                        path     => URLStrings.To_Bounded_String ("/somefile.txt"),
+                        others   => <>
+                    ),
+                    testMsg => To_Unbounded_String ("file://")
+                ),
                 ---------------------------------------------------------------
                 -- Queries
                 ---------------------------------------------------------------

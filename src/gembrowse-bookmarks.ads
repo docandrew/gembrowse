@@ -7,6 +7,7 @@
 -- Copyright 2022 Jon Andrew
 -------------------------------------------------------------------------------
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Ada.Text_IO; use Ada.Text_IO;
 
 with Gembrowse.UI.State;
 
@@ -18,6 +19,13 @@ package Gembrowse.Bookmarks is
     -- Specify the bookmark file that Gembrowse should use during this session.
     ---------------------------------------------------------------------------
     procedure useBookmarkFile (path : String);
+
+    ---------------------------------------------------------------------------
+    -- getBookmarkPath
+    --
+    -- Return the path to the bookmark file Gembrowse is using.
+    ---------------------------------------------------------------------------
+    function getBookmarkPath return String;
 
     ---------------------------------------------------------------------------
     -- addBookmark
