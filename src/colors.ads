@@ -83,6 +83,52 @@ package Colors is
         warning         => (16#FF#, 16#73#, 16#83#)
     );
 
-    currentTheme : Theme := Colors.ayuMirage;
+    gemBlue : Theme := (
+        bg              => (16#16#, 16#19#, 16#25#),
+        fg              => (16#40#, 16#6E#, 16#8E#),
+        ui              => (16#8E#, 16#A8#, 16#C3#),
+        editorLine      => (16#23#, 16#39#, 16#5B#),
+        bgSelected      => (16#23#, 16#39#, 16#5B#),
+        fgSelected      => (16#CB#, 16#F7#, 16#ED#),
+        h1              => (16#CB#, 16#F7#, 16#ED#),
+        h2              => (16#CB#, 16#F7#, 16#ED#),    -- make dimmer
+        h3              => (16#CB#, 16#F7#, 16#ED#),
+        visitedLink     => (16#8E#, 16#A8#, 16#C3#),
+        unvisitedLink   => (16#CB#, 16#F7#, 16#ED#),
+        bgQuote         => (16#16#, 16#19#, 16#25#),
+        fgQuote         => (16#8E#, 16#A8#, 16#C3#),
+        bgPreformat     => (16#16#, 16#19#, 16#25#),
+        fgPreformat     => (16#40#, 16#6E#, 16#8E#),
+        bgList          => (16#16#, 16#19#, 16#25#),
+        fgList          => (16#40#, 16#6E#, 16#8E#),
+        note            => (16#FC#, 16#FD#, 16#AF#),
+        caution         => (16#EF#, 16#D7#, 16#80#),
+        warning         => (16#DB#, 16#A1#, 16#59#)
+    );
 
+    vaporwave : Theme := (
+        bg              => (16#30#, 16#03#, 16#50#),
+        fg              => (16#94#, 16#16#, 16#7F#),
+        ui              => (16#E9#, 16#34#, 16#79#),
+        editorLine      => (16#30#, 16#03#, 16#50#),
+        bgSelected      => (16#30#, 16#03#, 16#50#),
+        fgSelected      => (16#F6#, 16#2E#, 16#97#),
+        h1              => (16#15#, 16#3C#, 16#B4#),
+        h2              => (16#15#, 16#3C#, 16#B4#),    -- make dimmer
+        h3              => (16#15#, 16#3C#, 16#B4#),
+        visitedLink     => (16#F9#, 16#AC#, 16#53#),
+        unvisitedLink   => (16#F9#, 16#AC#, 16#53#),
+        bgQuote         => (16#30#, 16#03#, 16#50#),
+        fgQuote         => (16#E9#, 16#34#, 16#79#),
+        bgPreformat     => (16#30#, 16#03#, 16#50#),
+        fgPreformat     => (16#94#, 16#16#, 16#7F#),
+        bgList          => (16#30#, 16#03#, 16#50#),
+        fgList          => (16#F6#, 16#2E#, 16#97#),
+        note            => (16#15#, 16#3C#, 16#B4#),
+        caution         => (16#F6#, 16#2E#, 16#97#),
+        warning         => (16#F9#, 16#AC#, 16#53#)
+    );
+
+    -- currentTheme : Theme := Colors.ayuMirage;
+    currentTheme : Theme := vaporwave;
 end Colors;
