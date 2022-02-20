@@ -46,6 +46,8 @@ package body Gembrowse.File is
             while not End_Of_File (input) loop
                 contents.Append (Get_Line (input));
             end loop;
+
+            Close (input);
         end if;
 
         Put_Line (Standard_Error, "file contents: " & contents.To_String);

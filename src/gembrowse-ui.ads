@@ -4,8 +4,6 @@
 -- Copyright 2022 Jon Andrew
 -------------------------------------------------------------------------------
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
-with Ada.Containers.Indefinite_Vectors;
-with Ada.Containers.Vectors;
 
 package Gembrowse.UI is
 

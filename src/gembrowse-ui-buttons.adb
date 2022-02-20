@@ -5,6 +5,7 @@
 --
 -- Copyright 2022 Jon Andrew
 -------------------------------------------------------------------------------
+with Ada.Strings.Fixed; use Ada.Strings.Fixed;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 
 with Gembrowse.UI.Input;
@@ -12,6 +13,9 @@ with Gembrowse.UI.State; use Gembrowse.UI.State;
 
 package body Gembrowse.UI.Buttons is
 
+    ---------------------------------------------------------------------------
+    -- Button
+    ---------------------------------------------------------------------------
     function Button (st : in out Gembrowse.UI.State.UIState;
                      x : Positive;
                      y : Positive;
@@ -35,7 +39,7 @@ package body Gembrowse.UI.Buttons is
 
         Put (label);
 
-        if Region_Hit (st, x - padl, y - padt, x + padr, y + padb) then
+        if Region_Hit (st, x - padl, y - padt, x + (label'Last - 1) + padr, y + padb) then
             st.Hot_Item  := id;
             st.Hot_Scope := scope;
 

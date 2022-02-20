@@ -7,6 +7,9 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 
 package Gembrowse.net is
 
+    ---------------------------------------------------------------------------
+    -- Gemini status codes
+    ---------------------------------------------------------------------------
     type StatusCode is new Positive range 10..99;
 
     INPUT                    : constant StatusCode := 10;
@@ -28,9 +31,29 @@ package Gembrowse.net is
     CLIENT_CERT_UNAUTHORIZED : constant StatusCode := 61;
     CLIENT_CERT_INVALID      : constant StatusCode := 62;
 
+    ---------------------------------------------------------------------------
+    -- Set up global libtls structs
+    ---------------------------------------------------------------------------
     procedure setup;
+
+    ---------------------------------------------------------------------------
+    -- Free memory used by global libtls structs
+    ---------------------------------------------------------------------------
     procedure teardown;
+
+    ---------------------------------------------------------------------------
+    -- fetchPage
+    -- Connects to the host specified by the urlstr, sends it the Gemini
+    -- request for that URL, and reads the response from the server.
+    -- We copy the response from this procedure's internal read buffer into the
+    -- @param page. As we do so, we keep track of the size of the longest line
+    -- in the document and the number of lines in the document. This way we can
+    -- adjust the scrollbars accordingly in the UI when we render the page.
+    ---------------------------------------------------------------------------
     function fetchPage (urlstr : Unbounded_String; 
-                        page   : out Unbounded_String) return Boolean;
+                        page   : out Unbounded_String;
+                        header : out Unbounded_String;
+                        lines  : out Natural;
+                        cols   : out Natural) return Boolean;
 
 end Gembrowse.net;

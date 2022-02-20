@@ -12,6 +12,8 @@ with GNAT.OS_Lib;
 with tls; use tls;
 
 with Console;
+with Util;
+
 with Gembrowse.URL;
 
 package body Gembrowse.Net is
@@ -40,7 +42,7 @@ package body Gembrowse.Net is
             GNAT.OS_Lib.OS_Exit (2);
         end if;
 
-        -- disable certificate validation
+        -- disable certificate validation (for now)
         tls_config_insecure_noverifycert (tlsConfig);
         tls_config_insecure_noverifyname (tlsConfig);
 
@@ -72,7 +74,10 @@ package body Gembrowse.Net is
     -- fetchPage
     ---------------------------------------------------------------------------
     function fetchPage (urlstr : Unbounded_String;
-                        page   : out Unbounded_String) return Boolean is
+                        page   : out Unbounded_String;
+                        header : out Unbounded_String;
+                        lines  : out Natural;
+                        cols   : out Natural) return Boolean is
 
         use Gembrowse.URL;
 
@@ -96,8 +101,25 @@ package body Gembrowse.Net is
         recvBuf : Buffer := (others => ASCII.NUL);
 
         tlsContext : access tls.tls;
+
+        -- The first data we receive from the server will be the response
+        -- header. This flag tells us to skip it when appending the actual
+        -- page contents.
+        inHeader      : Boolean := True;
+
+        -- Keep track of longest line, length of current line and number of lines.
+        lineLength  : Natural := 0;
+        longestLine : Natural := 0;
+        numLines    : Natural := 0;
+
+        use Util;       -- Util.max
     begin
-        page      := Null_Unbounded_String;
+        -- init out params
+        page   := Null_Unbounded_String;
+        header := Null_Unbounded_String;
+        lines  := 0;
+        cols   := 0;
+
         Gembrowse.URL.parseURL (boundedURL, parsedURL);
 
         if parsedURL.error /= NONE then
@@ -115,7 +137,7 @@ package body Gembrowse.Net is
         tlsContext := tls_client;
 
         if tlsContext = null then
-            Put_Line (Standard_Error, "Fatal: tls_client");
+            -- Put_Line (Standard_Error, "Fatal: tls_client");
             Free (portPtr);
             Free (fqdnPtr);
             return False;
@@ -123,8 +145,7 @@ package body Gembrowse.Net is
 
         -- apply config to context
         if tls_configure (tlsContext, tlsConfig) /= 0 then
-            -- Console.Error ("Fatal: tls_configure (" & Value (tls_error (tlsContext)) & ")");
-            Put_Line (Standard_Error, "Fatal: tls_configure (" & Value (tls_error (tlsContext)) & ")");
+            -- Put_Line (Standard_Error, "Fatal: tls_configure (" & Value (tls_error (tlsContext)) & ")");
             Free (portPtr);
             Free (fqdnPtr);
             return False;
@@ -132,7 +153,7 @@ package body Gembrowse.Net is
 
         -- Connect to server
         if tls_connect (tlsContext, fqdnPtr, portPtr) /= 0 then
-            Put_Line (Standard_Error, "Fatal: tls_connect (" & Value (tls_error (tlsContext)) & ")");
+            -- Put_Line (Standard_Error, "Fatal: tls_connect (" & Value (tls_error (tlsContext)) & ")");
             Free (portPtr);
             Free (fqdnPtr);
             return False;
@@ -140,7 +161,7 @@ package body Gembrowse.Net is
 
         -- Confirm handshake success
         if tls_handshake (tlsContext) /= 0 then
-            Put_Line (Standard_Error, "Fatal: tls_handshake (" & Value (tls_error (tlsContext)) & ")");
+            -- Put_Line (Standard_Error, "Fatal: tls_handshake (" & Value (tls_error (tlsContext)) & ")");
             Free (portPtr);
             Free (fqdnPtr);
             return False;
@@ -151,19 +172,19 @@ package body Gembrowse.Net is
         writeLen := tls_write (tlsContext, sendBuf(1)'Address, sendBuf'Length);
 
         if writeLen < 0 then
-            Put_Line (Standard_Error, "Fatal: tls_write (" & Value (tls_error (tlsContext)) & ")");
+            -- Put_Line (Standard_Error, "Fatal: tls_write (" & Value (tls_error (tlsContext)) & ")");
             Free (portPtr);
             Free (fqdnPtr);
             return False;
         end if;
 
-        -- receive page. We'll copy the buffer each time.
+        -- Receive the page. We'll copy the buffer each time.
         -- It seems that some servers will send the response such that
         -- the first tls_read will only get the header, and the second will get
         -- the body, other times we get everything on the first tls_read. Here
         -- we'll just keep reading while it has something to send.
         readLoop: loop
-            Put_Line (Standard_Error, "attempt tls_read");
+            -- Put_Line (Standard_Error, "attempt tls_read");
             readLen := tls_read (tlsContext, recvBuf(1)'Address, recvBuf'Length);
 
             if readLen = TLS_WANT_POLLIN or readLen = TLS_WANT_POLLOUT then
@@ -180,11 +201,30 @@ package body Gembrowse.Net is
                 bytesRead := bytesRead + readLen;
 
                 for i in 1 .. Integer(readLen) loop
-                    Put (Standard_Error, recvBuf (i));
-                    Append (page, recvBuf (i));
+                    -- Put (Standard_Error, recvBuf (i));
+
+                    if inHeader then
+                        if recvBuf(i) = ASCII.LF then
+                            inHeader := False;
+                        else
+                            Append (header, recvBuf (i));
+                        end if;
+                    else
+                        Append (page, recvBuf (i));
+
+                        if recvBuf(i) = ASCII.LF then
+                            numLines := numLines + 1;
+                            longestLine := max (longestLine, lineLength);
+                        else
+                            lineLength := lineLength + 1;
+                        end if;
+                    end if;
                 end loop;
             end if;
         end loop readLoop;
+
+        cols  := longestLine;
+        lines := numLines;
 
         -- Put_Line (Standard_Error, "Received" & bytesRead'Image & " bytes");
         -- Put_Line (Standard_Error, "Received " & To_String (page));

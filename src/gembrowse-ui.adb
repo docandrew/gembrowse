@@ -9,12 +9,16 @@
 -- @TODO - arrow keys for moving between tabs
 -- @TODO - viewport / scrollbars work
 -- @TODO - menu? plan is to just have separate pages for help, bookmarks,
---  etc. but need a discoverable way to open those tabs.
+--  etc. but need a discoverable way to open those tabs. Maybe we just have
+--  New Tab show that stuff.
 --
 -- Invariants:
 -- There will always be an active tab.
 -------------------------------------------------------------------------------
 with Ada.Assertions; use Ada.Assertions;
+with Ada.Containers.Doubly_Linked_Lists;
+with Ada.Containers.Indefinite_Vectors;
+with Ada.Containers.Vectors;
 with Ada.Interrupts; use Ada.Interrupts;
 with Ada.Interrupts.Names; use Ada.Interrupts.Names;
 with Ada.Real_Time;
@@ -54,6 +58,9 @@ package body Gembrowse.UI is
 
     highlightAddressBar : Boolean := False;
 
+    -- History
+    package Histories is new Ada.Containers.Doubly_Linked_Lists (Element_Type => Unbounded_String);
+
     ---------------------------------------------------------------------------
     -- PageState
     -- Internal representation of a Gemini page and associated metadata
@@ -62,23 +69,29 @@ package body Gembrowse.UI is
         title        : Unbounded_String;
         url          : Unbounded_String;
         tlsStatus    : Boolean;
+        header       : Unbounded_String;    -- server response header
         pageContents : Unbounded_String;
         bookmarked   : Boolean := False;
-        startx       : Positive := 1;             -- beginning of page we've scrolled to
+        startx       : Positive := 1;       -- beginning of page we've scrolled to
         starty       : Positive := 1;
-        status       : Unbounded_String;          -- status bar at bottom
+        lines        : Natural := 0;        -- number of lines in document
+        cols         : Natural := 0;        -- widest number of columns of document
+        status       : Unbounded_String;    -- status bar at bottom
+        history      : Histories.List;      -- per-tab history
+        historyIdx   : Histories.Cursor;    -- where in the history chain we are
     end record;
 
-    package PageStates is new Ada.Containers.Vectors (Index_Type => Positive, Element_Type => PageState);
+    package PageStates is new Ada.Containers.Indefinite_Vectors (Index_Type => Positive, Element_Type => PageState);
     tabs : PageStates.Vector;
 
     -- For testing. The actual scrollbar limits will be baked into the PageState.
     scrollx : Natural := 0;
     scrolly : Natural := 0;
 
-    -- fwd declaration
+    -- fwd declarations
     procedure clearPage (st : in out Gembrowse.UI.State.UIState);
     procedure switchTab (st : in out Gembrowse.UI.State.UIState; tabNum : Positive);
+    procedure historyNew (st : in out Gembrowse.UI.State.UIState; url : Unbounded_String);
 
     ---------------------------------------------------------------------------
     -- newTab
@@ -95,7 +108,6 @@ package body Gembrowse.UI is
             "* Written in Ada" & ASCII.LF &
             "* Mouse and Keyboard Friendly" & ASCII.LF &
             ASCII.LF &
-            "###    Bookmarks" & ASCII.LF &
             "=> file://" & Gembrowse.Bookmarks.getBookmarkPath & " Bookmarks" & ASCII.LF &
             ASCII.LF &
             "###    Links" & ASCII.LF &
@@ -111,7 +123,7 @@ package body Gembrowse.UI is
                                  url           => To_Unbounded_String ("New Tab"),
                                  tlsStatus     => True,
                                  pageContents  => To_Unbounded_String (newTabContents),
-                                 status        => To_Unbounded_String ("✔️ Loaded 843b in .013s "),
+                                 status        => To_Unbounded_String (""),
                                  others        => <>);
     begin
         tabs.Append (newState);
@@ -257,11 +269,24 @@ package body Gembrowse.UI is
     begin
         -- erase lines
         Console.setBGColor (Colors.currentTheme.bg);
+        Console.setColor (Colors.currentTheme.ui);
         Console.setCursor (1, PAGE_START);
 
         for i in PAGE_START .. st.Window_Height - 4 loop
             Console.eraseLine;
             Put (ASCII.LF);
+        end loop;
+
+        -- left vert border
+        for y in 6 .. st.Window_Height - 3 loop
+            Console.setCursor (1, y);
+            Put ("║");
+        end loop;
+
+        -- right vert border
+        for y in 6 .. st.Window_Height - 3 loop
+            Console.setCursor (st.Window_Width, y);
+            Put ("║");
         end loop;
 
     end clearPage;
@@ -288,22 +313,34 @@ package body Gembrowse.UI is
         -- Take a look at the URL.
         -- @TODO enforce length < 1024
         if Index (url, " ", 1) /= 0 then
+        
             -- If it has spaces, it's a search term.
             searchTerm := url;
             Gembrowse.URL.percentEncode (searchTerm);
             actualURL := To_Unbounded_String ("gemini://geminispace.info/search?" & To_String (searchTerm));
+        
         elsif Index (url, "file:", 1) = 1 then
+        
             -- try to load local file
+            -- @TODO need to set lines, cols for this too.
             actualURL := url;
             Gembrowse.File.loadLocalFile (To_String (url), tabs(activeTab).pageContents);
+            tabs(activeTab).url := actualURL;
             return;
+        
         elsif Index (url, "gemini://") /= 1 then
+
             -- If it starts with gemini://, great. If not, insert that (keep in mind 1024 char limit).
+            -- Keep in mind this might be a relative URL.
+            -- @TODO handle relative URLs.
             actualURL := To_Unbounded_String ("gemini://" & To_String (url));
         else
+        
             actualURL := url;
+        
         end if;
 
+        tabs(activeTab).url := actualURL;
         GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (actualURL));
 
         if actualURL.Length > 1024 then
@@ -311,10 +348,46 @@ package body Gembrowse.UI is
             return;
         end if;
 
-        if not Gembrowse.net.fetchPage (actualURL, tabs(activeTab).pageContents) then
+        if not Gembrowse.net.fetchPage (actualURL, 
+                                        tabs(activeTab).pageContents,
+                                        tabs(activeTab).header,
+                                        tabs(activeTab).lines,
+                                        tabs(activeTab).cols) then
             tabs(activeTab).status := To_Unbounded_String ("Error loading " & To_String (actualURL));
+        else
+            historyNew (st, actualURL);
         end if;
     end loadPage;
+
+    ---------------------------------------------------------------------------
+    -- historyBack
+    -- Move back to the previous page in the history chain, if it exists.
+    ---------------------------------------------------------------------------
+    procedure historyBack (st : in out Gembrowse.UI.State.UIState) is
+    begin
+        null;
+    end historyBack;
+
+    ---------------------------------------------------------------------------
+    -- historyForward
+    -- Move forward to the next page in the history chain, if it exists.
+    ---------------------------------------------------------------------------
+    procedure historyForward (st : in out Gembrowse.UI.State.UIState) is
+    begin
+        null;
+    end historyForward;
+
+    ---------------------------------------------------------------------------
+    -- historyNew
+    -- If we're at the end of our history chain, clicking on a new link or
+    -- entering a new URL will just add it to our chain. If we're not at the
+    -- end, then we delete all the nodes after our current one and then
+    -- append this new one.
+    ---------------------------------------------------------------------------
+    procedure historyNew (st : in out Gembrowse.UI.State.UIState; url : Unbounded_String) is
+    begin
+        null;
+    end historyNew;
 
     ---------------------------------------------------------------------------
     -- renderTitle
@@ -513,16 +586,16 @@ package body Gembrowse.UI is
         Put ("╣");
 
         -- Render navigation buttons
-        if Button (st, 3, 4, "⬅️", "Back (shortcut: backspace)", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
-            null;
+        if Button (st, 3, 4, "⬅️", "Back", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
+            historyBack (st);
         end if;
         
         if Button (st, 6, 4, "➡️", "Forward", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
-            null;
+            historyForward (st);
         end if;
 
         if Button (st, 9, 4, "🔄", "Reload Page (shortcut: F5)", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
-            null;
+            loadPage (st, tabs(activeTab).url);
         end if;
         
         Console.setBGColor (Colors.currentTheme.bg);
@@ -649,9 +722,9 @@ package body Gembrowse.UI is
         -----------------------------------------------------------------------
         function nextLineType (ubs : Unbounded_String; idx : Natural) return LineType is
             i : Natural := idx;
-            chr1 : Character;
-            chr2 : Character;
-            chr3 : Character;
+            chr1 : Character := ASCII.NUL;
+            chr2 : Character := ASCII.NUL;
+            chr3 : Character := ASCII.NUL;
         begin
             -- assert (Element (ubs, i) = ASCII.CR or Element (ubs, i) = ASCII.LF);
 
@@ -692,27 +765,9 @@ package body Gembrowse.UI is
         end nextLineType;
 
         -----------------------------------------------------------------------
-        -- parseLink
-        -- Given a text/gemini line containing a link, determine the URL and
-        -- user-friendly description. If no user-friendly description is
-        -- provided, desc will contain the URL.
-        -- @param idx - start of the line containing the link, will be set to
-        --  the end of the link line after this procedure call.
+        -- skipWhitespace
+        -- advance a cursor while whitespace exists.
         -----------------------------------------------------------------------
-        procedure parseLink (line : Unbounded_String; idx : in out Natural; url : out Unbounded_String; desc : out Unbounded_String) is
-            -- urlStart : Natural;
-            -- urlEnd : Natural;
-            -- descStart : Natural;
-            -- descEnd : Natural;
-        begin
-            null;
-            -- loop
-            -- end loop;
-            -- if Length (desc) = 0 then
-            --    desc := url;
-            -- end if;
-        end parseLink;
-
         procedure skipWhitespace (ubs : Unbounded_String; i : in out Natural) is
             c : Character;
         begin
@@ -726,6 +781,56 @@ package body Gembrowse.UI is
             end loop;
         end skipWhitespace;
 
+        -----------------------------------------------------------------------
+        -- parseLink
+        -- Given a text/gemini document containing a link, determine the URL and
+        -- user-friendly description. If no user-friendly description is
+        -- provided, desc will contain the URL.
+        -- @param idx - start of the line containing the link, will be set to
+        --  the end of the link line after this procedure call.
+        -----------------------------------------------------------------------
+        procedure parseLink (ubs  : Unbounded_String;
+                             idx  : in out Natural; 
+                             url  : out Unbounded_String; 
+                             desc : out Unbounded_String) is
+
+            tmpURL  : Unbounded_String := Null_Unbounded_String;
+            tmpDesc : Unbounded_String := Null_Unbounded_String;
+        begin
+            -- we've already skipped the initial whitespace (if any).
+            -- expect the next sequence of chars to be the URL.
+            loop
+                exit when idx > ubs.Length;
+                exit when isWhite (Element (ubs, idx));
+
+                tmpURL.Append (Element (ubs, idx));
+                idx := idx + 1;
+            end loop;
+
+            skipWhitespace (ubs, idx);
+
+            loop
+                exit when idx > ubs.Length;
+                exit when Element (ubs, idx) = ASCII.LF or Element (ubs, idx) = ASCII.CR;
+
+                tmpDesc.Append (Element (ubs, idx));
+                idx := idx + 1;
+            end loop;
+
+            if tmpDesc.Length = 0 then
+                tmpDesc := tmpURL;
+            end if;
+
+            url  := tmpURL;
+            desc := tmpDesc;
+        end parseLink;
+
+        -----------------------------------------------------------------------
+        -- skipFormatting
+        -- We don't want to render the extra markup for stuff like headers,
+        -- links, etc., so skip over those chars here. This advances the
+        -- page index/cursor (@param i)
+        -----------------------------------------------------------------------
         procedure skipFormatting (lt : LineType; i : in out Natural) is
         begin
             -- Depending on line type, we'll skip over the formatting chars.
@@ -733,15 +838,14 @@ package body Gembrowse.UI is
                 when Plain =>
                     i := i + 1;     -- skip LF
                 when Link =>
+                    -- =>[ws]URL[ws]User-Friendly-Name
                     i := i + 3;     -- skip LF, =>
                     skipWhitespace (tabs(activeTab).pageContents, i);
 
+                    --@TODO skip this if scrolled right
                     Console.underlineOff;
                     Put ("🔗 ");
                     Console.underlineOn;
-                    -- =>[ws]URL[ws]User-Friendly-Name
-                    -- i := i + 1; -- skip LF
-                    -- parseLink (tabs(activeTab).pageContents, i, url, desc);
                 when H1 =>
                     i := i + 2;     -- skip LF and #
                     skipWhitespace (tabs(activeTab).pageContents, i);
@@ -753,18 +857,26 @@ package body Gembrowse.UI is
                     skipWhitespace (tabs(activeTab).pageContents, i);
                 when UnorderedList =>
                     i := i + 3;     -- skip LF and '* '
+
+                    --@TODO skip this if scrolled right
                     Put ("• ");
                 when Quote =>
-                    i := i + 2;   -- skip LF and >
+                    i := i + 2;     -- skip LF and >
                 when Preformat =>
                     preformatting := not preformatting;
-                    i := i + 4; -- skip LF and ```
+                    i := i + 4;     -- skip LF and ```
             end case;
         end skipFormatting;
 
         -- Current viewport coordinates.
         vx : Natural := 3;
         vy : Natural := 7;
+
+        -- Document coordinates. i.e. the 1st character would be at
+        -- dx, dy = (1,1). If we get a LF, then dy := dy + 1; Each character we
+        -- print on the same line makes dx := dx + 1;
+        dx : Natural := 1;
+        dy : Natural := 1;
 
         w : Natural := st.Window_Width;
         h : Natural := st.Window_Height;
@@ -814,15 +926,16 @@ package body Gembrowse.UI is
             null;
         end if;
 
-        -- make it look a little nicer.
-        Console.setCursor (w-1, h-3);
+        -- add square between horiz and vert scrollbars to make it look a little nicer.
+        Console.setCursor (w - 1, h - 3);
         Put ("█");
-
-        Console.setCursor (vx, vy);
         
-        if Length(tabs(activeTab).pageContents) = 0 then
+        if tabs(activeTab).pageContents.Length = 0 then
             return;
         end if;
+
+        -- start rendering at these viewport coords
+        Console.setCursor (vx, vy);
 
         -- Need to open up a new scope here since certain widgets may be hidden
         -- within the page itself.
@@ -833,30 +946,96 @@ package body Gembrowse.UI is
         setStyle (curLineType);
         skipFormatting (curLineType, i);
 
-        -- This is a bit inefficent. We process the entire page and then determine whether
+        -- We iterate over the entire page and then determine whether
         -- the material being rendered is within the current viewport.
         loop
-            exit when i > Length (tabs(activeTab).pageContents);
+            exit when i > tabs(activeTab).pageContents.Length;
 
             c := Element (tabs(activeTab).pageContents, i);
 
             if c = ASCII.LF or c = ASCII.CR then
+                -- advance document coordinates.
+                dy := dy + 1;
+                dx := 1;
+
                 vx := 3;
                 vy := vy + 1;
+
+                -- if we have exceeded our viewport dimensions, then we don't
+                -- need to render any more lines.
+                if vy > h - 5 then
+                    exit;
+                end if;
+
                 Console.setCursor (vx, vy);
 
                 curLineType := nextLineType (tabs(activeTab).pageContents, i);
 
                 setStyle (curLineType);
                 skipFormatting (curLineType, i);
+
+                -- If the next line is a link, then instead of printing it
+                -- character by character, we'll render a Button whose label is
+                -- either the href or the description (if one is provided).
+                if curLineType = LINK then
+
+                    renderLink: declare
+                        href : Unbounded_String := Null_Unbounded_String;
+                        desc : Unbounded_String := Null_Unbounded_String;
+                    begin
+                        parseLink (tabs(activeTab).pageContents, i, href, desc);
+
+                        -- clip button by display width. When we get horizontal
+                        -- scrolling done we'll want to adjust the lower bound
+                        -- of this slice by startx
+                        if desc.Length > w - 3 then
+                            desc := Unbounded_Slice (desc, 1, w - 3);
+                        end if;
+
+                        if Button (st      => st,
+                                   x       => vx,
+                                   y       => vy,
+                                   label   => desc.To_String,
+                                   tooltip => href.To_String,
+                                   fg      => Colors.currentTheme.unvisitedLink,
+                                   bg      => Colors.currentTheme.bg) then
+                            
+                            Exit_Scope (st);
+                            setStyle (Plain);
+
+                            loadPage (st, href);
+                            return;
+                        end if;
+                    end renderLink;
+                
+                end if;
             else
-                -- if this character is outside of our current viewport, don't render it.
+                -- @TODO word wrap.
+                -- For normal lines:
+                -- how long is the next word?
+                -- if this character is outside of our current viewport, then
+                -- advance to next viewport line before rendering the next word
+                -- (unless it's a really long word, then just clip it.)
                 -- @TODO sensible line breaks (get length of next word, see if it will exceed viewport)
-                if vx > w - 2 or vy > h - 5 then
-                    null;
+
+                -- For links, preformatted sections and headings:
+                -- If this character is part of a preformatted section though,
+                -- then we just skip it.
+
+                if vx > w - 3 then
+                    vx := 3;
+                    vy := vy + 1;
+                    Console.setCursor (vx, vy);
+                end if;
+                
+                if vy > h - 5 then
+                    exit;
                 else
                     Put (c);
+                    vx := vx + 1;
+                    dx := dx + 1;
                 end if;
+
                 i := i + 1;
             end if;
         end loop;
@@ -1040,7 +1219,7 @@ package body Gembrowse.UI is
             -- Ctrl+l
             if st.Kbd_Modifier.CTRL and Element (st.Kbd_Text, 1) = 'l' then
                 highlightAddressBar := True;
-                -- consume the text so we don't input it.
+                -- consume the text so we don't input it again.
                 st.Kbd_Text := Null_Unbounded_String;
             end if;
         end if;
