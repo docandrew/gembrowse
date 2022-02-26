@@ -79,6 +79,7 @@ package body Gembrowse.UI is
         status       : Unbounded_String;    -- status bar at bottom
         history      : Histories.List;      -- per-tab history
         historyIdx   : Histories.Cursor;    -- where in the history chain we are
+        cursorPos    : Positive := 1;       -- save the cursor position in the address bar.
     end record;
 
     package PageStates is new Ada.Containers.Indefinite_Vectors (Index_Type => Positive, Element_Type => PageState);
@@ -140,6 +141,12 @@ package body Gembrowse.UI is
     procedure switchTab (st : in out Gembrowse.UI.State.UIState; tabNum : Positive) is
     begin
         clearPage (st);
+        
+        tabs(activeTab).cursorPos := st.Cursor_Pos;     -- save old cursor position for current tab
+        st.Selection_Start := 1;                        -- deselect any selected text.
+        st.Selection_End   := 1;
+        st.Cursor_Pos      := tabs(tabNum).cursorPos;   -- restore cursor position for new tab
+
         activeTab := tabNum;
     end switchTab;
 
@@ -163,9 +170,6 @@ package body Gembrowse.UI is
         wasLast := (num = tabs.Last_Index);
 
         tabs.Delete (num);
-
-        -- selectNone;
-        -- addressBarState.Active := False;
 
         if tabs.Is_Empty then
             newTab (st);
@@ -586,15 +590,15 @@ package body Gembrowse.UI is
         Put ("╣");
 
         -- Render navigation buttons
-        if Button (st, 3, 4, "⬅️", "Back", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
+        if Button (st, 3, 4, "⬅️", "Back", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, -2) then
             historyBack (st);
         end if;
         
-        if Button (st, 6, 4, "➡️", "Forward", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
+        if Button (st, 6, 4, "➡️", "Forward", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, -2) then
             historyForward (st);
         end if;
 
-        if Button (st, 9, 4, "🔄", "Reload Page (shortcut: F5)", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, 2) then
+        if Button (st, 9, 4, "🔄", "Reload Page (shortcut: F5)", Colors.currentTheme.bg, Colors.currentTheme.ui, 0, -2) then
             loadPage (st, tabs(activeTab).url);
         end if;
         
@@ -611,7 +615,7 @@ package body Gembrowse.UI is
         
         -- if CA-signed cert
         if Button (st, 12, 4, "🔐", "Self-signed certificate (Trusted on First-Use)",
-                   Colors.currentTheme.ui, Colors.currentTheme.note, 0, 2) then
+                   Colors.currentTheme.ui, Colors.currentTheme.note, 0, -2) then
             null;                   
         end if;
 
@@ -868,18 +872,70 @@ package body Gembrowse.UI is
             end case;
         end skipFormatting;
 
+        -----------------------------------------------------------------------
+        -- getNextWordLength
+        -- Get the length of the next word to decide if we need to break the
+        -- line or not. Assume i points at the space.
+        -----------------------------------------------------------------------
+        function getNextWordLength (ubs : Unbounded_String; i : Natural) return Natural is
+            len : Natural := 0;
+        begin
+            for x in i + 1 .. ubs.Length loop
+                exit when isWhite (ubs.Element(x));
+
+                len := len + 1;
+            end loop;
+
+            return len;
+        end getNextWordLength;
+
+        -----------------------------------------------------------------------
+        -- viewport dimensions
+        -----------------------------------------------------------------------
+        VIEWPORT_STARTX : constant := 3;
+        VIEWPORT_STARTY : constant := 7;
+        
+        w : constant Natural := st.Window_Width;
+        h : constant Natural := st.Window_Height;
+
+        VIEWPORT_ENDX : constant Natural := w - 3;
+        VIEWPORT_ENDY : constant Natural := h - 5;
+
+        -----------------------------------------------------------------------
+        -- put
+        -- Put the next character and advance the viewport and document 
+        -- coordinates. If we're at the far right edge of the viewport, then
+        -- advance to next line. Otherwise, just print the character.
+        -- This does _not_ advance the index into the page itself.
+        -----------------------------------------------------------------------
+        procedure Put (c : Character; dx, dy, vx, vy : in out Natural) is
+            w : Natural := st.Window_Width;
+            h : Natural := st.Window_Height;
+        begin
+            if vx > VIEWPORT_ENDX then
+                vx := 3;
+                vy := vy + 1;
+                Console.setCursor (vx, vy);
+            end if;
+            
+            if vy > VIEWPORT_ENDY then
+                return;
+            else
+                Put (c);
+                vx := vx + 1;
+                dx := dx + 1;
+            end if;
+        end Put;
+
         -- Current viewport coordinates.
-        vx : Natural := 3;
-        vy : Natural := 7;
+        vx : Natural := VIEWPORT_STARTX;
+        vy : Natural := VIEWPORT_STARTY;
 
         -- Document coordinates. i.e. the 1st character would be at
         -- dx, dy = (1,1). If we get a LF, then dy := dy + 1; Each character we
         -- print on the same line makes dx := dx + 1;
         dx : Natural := 1;
         dy : Natural := 1;
-
-        w : Natural := st.Window_Width;
-        h : Natural := st.Window_Height;
 
         -- index into page contents and char at that index
         i : Natural := 0;
@@ -888,41 +944,43 @@ package body Gembrowse.UI is
         -- type of line being rendered
         curLineType : LineType;
 
+        -- For determining word wrap
+        nextWordLength : Natural;
+
         use Gembrowse.UI.Buttons;
     begin
         Console.setBGColor (Colors.currentTheme.bg);
         Console.setColor (Colors.currentTheme.ui);
 
         -- left vert border
-        for y in 6..h-3 loop
+        for y in 6 .. h - 3 loop
             Console.setCursor (1, y);
             Put ("║");
         end loop;
 
         -- right vert border
-        for y in 6..h-3 loop
+        for y in 6 .. h - 3 loop
             Console.setCursor (w, y);
             Put ("║");
         end loop;
 
-        if Vertical_Scrollbar (st => st,
-                               x => w - 1,
-                               y => 6,
+        if Vertical_Scrollbar (st     => st,
+                               x      => w - 1,
+                               y      => 6,
                                Height => h - 10,
-                               Min => 0,
-                               Max => 100,
-                               Val => scrolly) then
+                               Min    => 0,
+                               Max    => 100,
+                               Val    => scrolly) then
             null;
         end if;
 
-        -- horiz scrollbar
-        if Horizontal_Scrollbar (st => st,
-                                 x => 2,
-                                 y => h-3,
-                                 Width => w-4,
-                                 Min => 0,
-                                 Max => 100,
-                                 Val => scrollx) then
+        if Horizontal_Scrollbar (st    => st,
+                                 x     => 2,
+                                 y     => h - 3,
+                                 Width => w - 4,
+                                 Min   => 0,
+                                 Max   => 100,
+                                 Val   => scrollx) then
             null;
         end if;
 
@@ -946,29 +1004,26 @@ package body Gembrowse.UI is
         setStyle (curLineType);
         skipFormatting (curLineType, i);
 
-        -- We iterate over the entire page and then determine whether
-        -- the material being rendered is within the current viewport.
+        -- We iterate over the entire page until
+        -- the material being rendered is within the current viewport. Once
+        -- we exceed the viewport height we stop rendering.
         loop
             exit when i > tabs(activeTab).pageContents.Length;
+            exit when vy > VIEWPORT_ENDY;
 
             c := Element (tabs(activeTab).pageContents, i);
 
             if c = ASCII.LF or c = ASCII.CR then
-                -- advance document coordinates.
+                -- advance document and viewport coordinates.
                 dy := dy + 1;
                 dx := 1;
 
                 vx := 3;
                 vy := vy + 1;
 
-                -- if we have exceeded our viewport dimensions, then we don't
-                -- need to render any more lines.
-                if vy > h - 5 then
-                    exit;
-                end if;
-
                 Console.setCursor (vx, vy);
 
+                -- Determine the type of the next line.
                 curLineType := nextLineType (tabs(activeTab).pageContents, i);
 
                 setStyle (curLineType);
@@ -1007,37 +1062,40 @@ package body Gembrowse.UI is
                             return;
                         end if;
                     end renderLink;
-                
                 end if;
-            else
-                -- @TODO word wrap.
-                -- For normal lines:
-                -- how long is the next word?
-                -- if this character is outside of our current viewport, then
-                -- advance to next viewport line before rendering the next word
-                -- (unless it's a really long word, then just clip it.)
-                -- @TODO sensible line breaks (get length of next word, see if it will exceed viewport)
+            elsif c = ' ' or c = ASCII.HT then
+                -- At a space or tab. Determine how long the next word is. If
+                -- it's longer than the viewport width, then just go ahead and
+                -- keep rendering it and let the default character handling 
+                -- (which wraps at viewport edge) do its thing. If the word is shorter
+                -- than the viewport width, but its too long to render within the
+                -- viewport, then insert a manual line break.
+                nextWordLength := getNextWordLength (tabs(activeTab).pageContents, i);
 
-                -- For links, preformatted sections and headings:
-                -- If this character is part of a preformatted section though,
-                -- then we just skip it.
-
-                if vx > w - 3 then
-                    vx := 3;
+                if nextWordLength > w - 3 then
+                    -- word is longer than the viewport, so just accept default behavior
+                    -- (overflow to next line)
+                    Put (c, dx, dy, vx, vy);
+                    -- Put_Line (Standard_Error, "really long" & nextWordLength'Image);
+                elsif nextWordLength + vx > w - 3 then
+                    -- ignore the space and just start the word at the next line.
                     vy := vy + 1;
-                    Console.setCursor (vx, vy);
-                end if;
-                
-                if vy > h - 5 then
-                    exit;
+                    vx := VIEWPORT_STARTX;
+                    -- Put_Line (Standard_Error, "word wrap" & nextWordLength'Image);
                 else
-                    Put (c);
-                    vx := vx + 1;
-                    dx := dx + 1;
+                    -- print the space.
+                    Put (c, dx, dy, vx, vy);
                 end if;
 
                 i := i + 1;
+            else
+                Put (c, dx, dy, vx, vy);
+
+                i := i + 1;
             end if;
+
+            -- note: we don't always want to increment i, since when we get a LF
+            -- the skipFormatting procedure will take care of that for us.
         end loop;
 
         Exit_Scope (st);

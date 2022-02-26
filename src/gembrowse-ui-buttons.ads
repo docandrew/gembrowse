@@ -23,8 +23,17 @@ package Gembrowse.UI.Buttons is
     -- @param y : y position of the button
     -- @param label : label of the button
     -- @param tooltip : tooltip for button hover
-    -- @param pad : padding if detection region of button should be larger than
-    --  the button size itself
+    -- @param pad : padding if detection region of button should be larger (or smaller) 
+    --  than the button size itself. 
+    --
+    --  Sometimes with multi-byte emojis the "length"
+    --   of the label is larger than the cells it occupies, so a negative pad will
+    --   give more accurate mouse detection for the button. Other times, the
+    --   detection of a button needs to have some "grace" around it to make it a
+    --   more clickable target. A positive pad is an easy way to do that.
+    --
+    --  Using a tooltip is a good way to test the detection region of your
+    --   button.
     -- @param fg : foreground color of text on button
     -- @param bg : background color of text on button
     -- @return True if button was pressed, False otherwise.
@@ -37,9 +46,9 @@ package Gembrowse.UI.Buttons is
                      tooltip : String;
                      fg : Colors.ThemeColor := Colors.currentTheme.ui;
                      bg : Colors.ThemeColor := Colors.currentTheme.bg;
-                     padl : Natural := 0;
-                     padr : Natural := 0;
-                     padt : Natural := 0;
-                     padb : Natural := 0) return Boolean;
+                     padl : Integer := 0;
+                     padr : Integer := 0;
+                     padt : Integer := 0;
+                     padb : Integer := 0) return Boolean;
 
 end Gembrowse.UI.Buttons;

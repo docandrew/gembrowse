@@ -23,10 +23,10 @@ package body Gembrowse.UI.Buttons is
                      tooltip : String;
                      fg   : Colors.ThemeColor := Colors.currentTheme.ui;
                      bg   : Colors.ThemeColor := Colors.currentTheme.bg;
-                     padl : Natural := 0;
-                     padr : Natural := 0;
-                     padt : Natural := 0;
-                     padb : Natural := 0) return Boolean is
+                     padl : Integer := 0;
+                     padr : Integer := 0;
+                     padt : Integer := 0;
+                     padb : Integer := 0) return Boolean is
         
         id      : constant Gembrowse.UI.State.ID := Gembrowse.UI.State.Next_ID (st);
         scope   : constant Gembrowse.UI.State.Scope_ID := st.Curr_Scope;

@@ -167,7 +167,7 @@ package Gembrowse.UI.State is
         Cursor_Pos       : Positive := 1;
         Selection_Start  : Positive := 1;
         Selection_End    : Positive := 1;
-        Word_Select      : Boolean := False;
+        Word_Select      : Boolean  := False;
         First_Draw_Index : Positive := 1;
 
         --Selection_Dir   : Select_Direction;

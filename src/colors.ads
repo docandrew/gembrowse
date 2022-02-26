@@ -129,6 +129,6 @@ package Colors is
         warning         => (16#F9#, 16#AC#, 16#53#)
     );
 
-    -- currentTheme : Theme := Colors.ayuMirage;
-    currentTheme : Theme := vaporwave;
+    currentTheme : Theme := Colors.ayuMirage;
+    -- currentTheme : Theme := vaporwave;
 end Colors;
