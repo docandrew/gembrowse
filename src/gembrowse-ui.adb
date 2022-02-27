@@ -1081,6 +1081,7 @@ package body Gembrowse.UI is
                     -- ignore the space and just start the word at the next line.
                     vy := vy + 1;
                     vx := VIEWPORT_STARTX;
+                    Console.setCursor (vx, vy);
                     -- Put_Line (Standard_Error, "word wrap" & nextWordLength'Image);
                 else
                     -- print the space.
