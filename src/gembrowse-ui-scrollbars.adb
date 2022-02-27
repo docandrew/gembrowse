@@ -88,8 +88,11 @@ package body Gembrowse.UI.Scrollbars is
                     -- if Mouse_Pos > Max then
                     --     Mouse_Pos := Max;
                     -- end if;
-
-                    New_Val := Min + Integer(Float(Mouse_Pos) / cellsPerVal);
+                    if cellsPerVal = 0.0 then
+                        New_Val := Min;
+                    else
+                        New_Val := Min + Integer(Float(Mouse_Pos) / cellsPerVal);
+                    end if;
 
                     if New_Val < Min then New_Val := Min; end if;
                     if New_Val > Max then New_Val := Max; end if;
@@ -246,8 +249,11 @@ package body Gembrowse.UI.Scrollbars is
                     -- if Mouse_Pos > Max then
                     --     Mouse_Pos := Max;
                     -- end if;
-
-                    New_Val := Min + Integer(Float(Mouse_Pos) / cellsPerVal);
+                    if cellsPerVal = 0.0 then
+                        New_Val := Min;
+                    else
+                        New_Val := Min + Integer(Float(Mouse_Pos) / cellsPerVal);
+                    end if;
 
                     if New_Val < Min then New_Val := Min; end if;
                     if New_Val > Max then New_Val := Max; end if;

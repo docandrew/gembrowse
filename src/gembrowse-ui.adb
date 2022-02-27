@@ -94,6 +94,77 @@ package body Gembrowse.UI is
     procedure switchTab (st : in out Gembrowse.UI.State.UIState; tabNum : Positive);
     procedure historyNew (st : in out Gembrowse.UI.State.UIState; url : Unbounded_String);
 
+    -----------------------------------------------------------------------
+    -- isWhite
+    -- Return True if character is whitespace, False otherwise.
+    -----------------------------------------------------------------------
+    function isWhite (c : Character) return Boolean is
+    begin
+        return (c = ' ' or c = ASCII.HT or c = ASCII.LF or c = ASCII.CR or c = ASCII.LF);
+    end isWhite;
+
+    -----------------------------------------------------------------------
+    -- getNextWordLength
+    -- Get the length of the next word in an Unbounded_String 
+    -- (to decide if we need to break the line or not). 
+    -- @param i is the index into the Unbounded_String prior to the word
+    -- whose length we're calculating.
+    -----------------------------------------------------------------------
+    function getNextWordLength (ubs : Unbounded_String; i : Natural) return Natural is
+        len : Natural := 0;
+    begin
+        for x in i + 1 .. ubs.Length loop
+            exit when isWhite (ubs.Element(x));
+
+            len := len + 1;
+        end loop;
+
+        return len;
+    end getNextWordLength;
+
+    -----------------------------------------------------------------------
+    -- getLines
+    -- Return the number of lines in a document taking into account
+    -- the viewport width and splitting lines on word breaks.
+    -----------------------------------------------------------------------
+    function getLines (ubs : Unbounded_String; w : Positive) return Natural is
+        i : Natural := 1;
+        lines : Natural := 0;
+        c : Character := ASCII.NUL;
+        nextWordLength : Natural;
+        fakeVX : Positive := 1;
+    begin
+        loop
+            exit when i > ubs.Length;
+            c := ubs.Element(i);
+
+            if c = ASCII.LF or c = ASCII.CR then
+                lines := @ + 1;
+            elsif c = ' ' or c = ASCII.HT then
+                nextWordLength := getNextWordLength (ubs, i);
+
+                if nextWordLength > w - 3 then
+                    -- adjust number of lines even if not viewable so the
+                    -- scrollbar is accurate.
+                    lines := @ + 1;
+                    fakeVX := 1;
+                elsif nextWordLength + fakeVX > w - 3 then
+                    lines := @ + 1;
+                    fakeVX := 1;
+                else
+                    fakeVX := @ + 1;
+                end if;
+            else
+                -- normal char
+                fakeVX := @ + 1;
+            end if;
+
+            i := i + 1;
+        end loop;
+
+        return lines;
+    end getLines;
+
     ---------------------------------------------------------------------------
     -- newTab
     ---------------------------------------------------------------------------
@@ -193,10 +264,13 @@ package body Gembrowse.UI is
     ---------------------------------------------------------------------------
     procedure scrollUp (st : in out Gembrowse.UI.State.UIState; lines : Positive := 1) is
     begin
-        if tabs(activeTab).scrolly >= 0 + lines then
+        if tabs(activeTab).scrolly > 0 + lines then
             tabs(activeTab).scrolly := @ - lines;
-            st.Page_Dirty := True;
+        else
+            tabs(activeTab).scrolly := 1;
         end if;
+
+        st.Page_Dirty := True;
     end scrollUp;
 
     ---------------------------------------------------------------------------
@@ -205,10 +279,13 @@ package body Gembrowse.UI is
     ---------------------------------------------------------------------------
     procedure scrollDown (st : in out Gembrowse.UI.State.UIState; lines : Positive := 1) is
     begin
-        if tabs(activeTab).scrolly <= tabs(activeTab).lines - lines then
+        if tabs(activeTab).scrolly < tabs(activeTab).lines - lines then
             tabs(activeTab).scrolly := @ + lines;
-            st.Page_Dirty := True;
+        else
+            tabs(activeTab).scrolly := tabs(activeTab).lines;
         end if;
+
+        st.Page_Dirty := True;
     end scrollDown;
 
     ---------------------------------------------------------------------------
@@ -324,9 +401,14 @@ package body Gembrowse.UI is
 
         clearPage (st);
 
-        -- Force re-render
+        -- Force re-render and scroll up to the top. Clear the selection
         st.Page_Dirty := True;
-        st.scrolly := 1;
+        
+        st.Cursor_Pos := 1;
+        st.Selection_End := 1;
+        st.Selection_Start := 1;
+
+        tabs(activeTab).scrolly := 1;
 
         -- Take a look at the URL.
         -- @TODO enforce length < 1024
@@ -344,6 +426,7 @@ package body Gembrowse.UI is
             actualURL := url;
             Gembrowse.File.loadLocalFile (To_String (url), tabs(activeTab).pageContents);
             tabs(activeTab).url := actualURL;
+            tabs(activeTab).lines := getLines (tabs(activeTab).pageContents, st.Window_Width);
             return;
         
         elsif Index (url, "gemini://") /= 1 then
@@ -370,6 +453,7 @@ package body Gembrowse.UI is
             tabs(activeTab).status := To_Unbounded_String ("Error loading " & To_String (actualURL));
             GUI_State.tooltip := tabs(activeTab).status;
         else
+            tabs(activeTab).lines := getLines (tabs(activeTab).pageContents, st.Window_Width);
             historyNew (st, actualURL);
         end if;
     end loadPage;
@@ -663,15 +747,6 @@ package body Gembrowse.UI is
         type LineType is (Plain, Link, H1, H2, H3, Preformat, UnorderedList, Quote);
 
         -----------------------------------------------------------------------
-        -- isWhite
-        -- Return True if character is whitespace, False otherwise.
-        -----------------------------------------------------------------------
-        function isWhite (c : Character) return Boolean is
-        begin
-            return (c = ' ' or c = ASCII.HT or c = ASCII.LF or c = ASCII.CR or c = ASCII.LF);
-        end isWhite;
-
-        -----------------------------------------------------------------------
         -- setStyle
         -- Given the type of line, set rendering style accordingly.
         -----------------------------------------------------------------------
@@ -741,9 +816,6 @@ package body Gembrowse.UI is
             chr2 : Character := ASCII.NUL;
             chr3 : Character := ASCII.NUL;
         begin
-            -- assert (Element (ubs, i) = ASCII.CR or Element (ubs, i) = ASCII.LF);
-
-            i := i + 1;
             if i <= Length (ubs) then
                 chr1 := Element (ubs, i);
             end if;
@@ -851,54 +923,36 @@ package body Gembrowse.UI is
             -- Depending on line type, we'll skip over the formatting chars.
             case lt is 
                 when Plain =>
-                    i := i + 1;     -- skip LF
+                    null;
                 when Link =>
                     -- =>[ws]URL[ws]User-Friendly-Name
-                    i := i + 3;     -- skip LF, =>
+                    i := i + 2;     -- skip =>
                     skipWhitespace (tabs(activeTab).pageContents, i);
 
-                    --@TODO skip this if scrolled right
                     Console.underlineOff;
                     Put ("🔗 ");
                     Console.underlineOn;
                 when H1 =>
-                    i := i + 2;     -- skip LF and #
+                    i := i + 1;     -- skip #
                     skipWhitespace (tabs(activeTab).pageContents, i);
                 when H2 =>
-                    i := i + 3;     -- skip LF and ##
+                    i := i + 2;     -- skip ##
                     skipWhitespace (tabs(activeTab).pageContents, i);
                 when H3 =>
-                    i := i + 4;     -- skip LF and ###
+                    i := i + 3;     -- skip ###
                     skipWhitespace (tabs(activeTab).pageContents, i);
                 when UnorderedList =>
-                    i := i + 3;     -- skip LF and '* '
-
-                    --@TODO skip this if scrolled right
+                    i := i + 2;     -- skip '* '
                     Put ("• ");
                 when Quote =>
-                    i := i + 2;     -- skip LF and >
+                    i := i + 1;     -- skip >
                 when Preformat =>
                     preformatting := not preformatting;
-                    i := i + 4;     -- skip LF and ```
+                    i := i + 3;     -- skip ```
+                    -- @TODO: there can be a description after ```, we want
+                    --  to not render that but make it a tooltip if hovered.
             end case;
         end skipFormatting;
-
-        -----------------------------------------------------------------------
-        -- getNextWordLength
-        -- Get the length of the next word to decide if we need to break the
-        -- line or not. Assume i points at the space.
-        -----------------------------------------------------------------------
-        function getNextWordLength (ubs : Unbounded_String; i : Natural) return Natural is
-            len : Natural := 0;
-        begin
-            for x in i + 1 .. ubs.Length loop
-                exit when isWhite (ubs.Element(x));
-
-                len := len + 1;
-            end loop;
-
-            return len;
-        end getNextWordLength;
 
         -----------------------------------------------------------------------
         -- viewport dimensions
@@ -938,6 +992,130 @@ package body Gembrowse.UI is
             end if;
         end Put;
 
+        -----------------------------------------------------------------------
+        -- renderLine
+        -- Determine style of the current line and render it appropriately.
+        -----------------------------------------------------------------------
+        procedure renderLine (ubs : Unbounded_String; i : in out Natural; dx, dy, vx, vy : in out Natural) is
+            curLineType : LineType;
+            c : Character := ASCII.NUL;
+            nextWordLength : Natural;
+        begin
+            -- What kind of line is this?
+            curLineType := nextLineType (tabs(activeTab).pageContents, i);
+            setStyle (curLineType);
+            skipFormatting (curLineType, i);
+
+            -- If the next line is a link, then instead of printing it
+            -- character by character, we'll render a Button whose label is
+            -- either the href or the description (if one is provided).
+            if curLineType = LINK then
+
+                renderLink: declare
+                    href : Unbounded_String := Null_Unbounded_String;
+                    desc : Unbounded_String := Null_Unbounded_String;
+                begin
+                    parseLink (tabs(activeTab).pageContents, i, href, desc);
+
+                    -- clip button by display width. When we get horizontal
+                    -- scrolling done we'll want to adjust the lower bound
+                    -- of this slice by startx
+                    if desc.Length > w - 3 then
+                        desc := Unbounded_Slice (desc, 1, w - 3);
+                    end if;
+
+                    if Button (st      => st,
+                                x       => vx,
+                                y       => vy,
+                                label   => desc.To_String,
+                                tooltip => href.To_String,
+                                fg      => Colors.currentTheme.unvisitedLink,
+                                bg      => Colors.currentTheme.bg) then
+                        
+                        -- Exit_Scope (st);
+                        setStyle (Plain);
+
+                        loadPage (st, href);
+                        return;
+                    end if;
+                end renderLink;
+            else
+                -- Render until the end of the line.
+                loop
+                    exit when i > ubs.Length;
+
+                    c := ubs.Element(i);
+                    exit when c = ASCII.LF or c = ASCII.CR;
+
+                    if c = ' ' or c = ASCII.HT then
+                        -- At a space or tab. Determine how long the next word is. If
+                        -- it's longer than the viewport width, then just go ahead and
+                        -- keep rendering it and let the default character handling 
+                        -- (which wraps at viewport edge) do its thing. If the word is shorter
+                        -- than the viewport width, but its too long to render within the
+                        -- viewport, then insert a manual line break.
+                        nextWordLength := getNextWordLength (tabs(activeTab).pageContents, i);
+
+                        if nextWordLength > w - 3 then
+                            -- word is longer than the viewport, so just accept default Put behavior
+                            -- (overflow to next line). Adjust the number of lines in the
+                            -- document when we do this.
+                            Put (c, dx, dy, vx, vy);
+                        elsif nextWordLength + vx > w - 3 then
+                            -- ignore the space and just start the word at the next line.
+                            vy := vy + 1;
+                            vx := VIEWPORT_STARTX;
+                            Console.setCursor (vx, vy);
+                        else
+                            -- print the space.
+                            Put (c, dx, dy, vx, vy);
+                        end if;
+                    else
+                        -- normal char
+                        Put (c, dx, dy, vx, vy);
+                    end if;
+
+                    i := i + 1;
+                end loop;
+            end if;
+
+            -- skip the LF
+            i := i + 1;
+
+            -- advance document coords
+            dy := dy + 1;
+            dx := 1;
+
+            -- advance viewport coords to next line.
+            vx := 3;
+            vy := vy + 1;
+            Console.setCursor (vx, vy);
+        end renderLine;
+
+        -----------------------------------------------------------------------
+        -- invisibleLine
+        -- advance document coordinates by one line
+        -----------------------------------------------------------------------
+        procedure invisibleLine (ubs : Unbounded_String; i : in out Natural; dx, dy : in out Natural) is
+            c : Character := ASCII.NUL;
+            fakeVX : Positive := 1; 
+        begin
+            loop
+                exit when i > ubs.Length;
+                c := ubs.Element(i);
+                exit when c = ASCII.LF or c = ASCII.CR;
+
+                i := i + 1;
+            end loop;
+
+            -- skip the LF
+            i := i + 1;
+
+            -- advance document coords to next line
+            dy := dy + 1;
+            dx := 1;
+        end invisibleLine;
+
         -- Current viewport coordinates.
         vx : Natural := VIEWPORT_STARTX;
         vy : Natural := VIEWPORT_STARTY;
@@ -949,14 +1127,14 @@ package body Gembrowse.UI is
         dy : Natural := 1;
 
         -- index into page contents and char at that index
-        i : Natural := 0;
+        i : Natural := 1;
         c : Character;
 
         -- type of line being rendered
-        curLineType : LineType;
+        -- curLineType : LineType;
 
         -- For determining word wrap
-        nextWordLength : Natural;
+        -- nextWordLength : Natural;
 
         use Gembrowse.UI.Buttons;
     begin
@@ -1017,134 +1195,148 @@ package body Gembrowse.UI is
         -- within the page itself.
         Enter_Scope (st);
 
-        -- Determine initial line type (if we're within the viewable area).
-        if dy >= tabs(activeTab).scrolly then
-            curLineType := nextLineType (tabs(activeTab).pageContents, i);
-            setStyle (curLineType);
-            skipFormatting (curLineType, i);
-        else
-            i := 1;
-        end if;
-
-        -- reset number of lines if page is dirty and we have to re-render
-        tabs(activeTab).lines := 1;
-
-        -- We iterate over the entire page until
-        -- the document coordinates are after the start of our scroll
-        -- location, then start rendering. When we reach the end of the viewport
-        -- we stop rendering.
-        loop
+        renderLoop: loop
             exit when i > tabs(activeTab).pageContents.Length;
             exit when vy >= VIEWPORT_ENDY;
 
-            c := Element (tabs(activeTab).pageContents, i);
-
-            if c = ASCII.LF or c = ASCII.CR then
-                -- advance document coordinates no matter what.
-                dx := 1;
-                dy := dy + 1;
-                tabs(activeTab).lines := @ + 1;
-
-                -- only do rendering if we're past the start of our
-                -- scrolled-to area.
-                if dy >= tabs(activeTab).scrolly then
-                    vx := 3;
-                    vy := vy + 1;
-
-                    Console.setCursor (vx, vy);
-
-                    -- Determine the type of the next line.
-                    curLineType := nextLineType (tabs(activeTab).pageContents, i);
-
-                    setStyle (curLineType);
-                    skipFormatting (curLineType, i);
-
-                    -- If the next line is a link, then instead of printing it
-                    -- character by character, we'll render a Button whose label is
-                    -- either the href or the description (if one is provided).
-                    if curLineType = LINK then
-
-                        renderLink: declare
-                            href : Unbounded_String := Null_Unbounded_String;
-                            desc : Unbounded_String := Null_Unbounded_String;
-                        begin
-                            parseLink (tabs(activeTab).pageContents, i, href, desc);
-
-                            -- clip button by display width. When we get horizontal
-                            -- scrolling done we'll want to adjust the lower bound
-                            -- of this slice by startx
-                            if desc.Length > w - 3 then
-                                desc := Unbounded_Slice (desc, 1, w - 3);
-                            end if;
-
-                            if Button (st      => st,
-                                       x       => vx,
-                                       y       => vy,
-                                       label   => desc.To_String,
-                                       tooltip => href.To_String,
-                                       fg      => Colors.currentTheme.unvisitedLink,
-                                       bg      => Colors.currentTheme.bg) then
-                                
-                                Exit_Scope (st);
-                                setStyle (Plain);
-
-                                loadPage (st, href);
-                                return;
-                            end if;
-                        end renderLink;
-                    end if;
-                else
-                    i := i + 1;
-                end if;
-            elsif c = ' ' or c = ASCII.HT then
-                -- At a space or tab. Determine how long the next word is. If
-                -- it's longer than the viewport width, then just go ahead and
-                -- keep rendering it and let the default character handling 
-                -- (which wraps at viewport edge) do its thing. If the word is shorter
-                -- than the viewport width, but its too long to render within the
-                -- viewport, then insert a manual line break.
-                nextWordLength := getNextWordLength (tabs(activeTab).pageContents, i);
-
-                if nextWordLength > w - 3 then
-                    -- word is longer than the viewport, so just accept default behavior
-                    -- (overflow to next line). Adjust the number of lines in the
-                    -- document when we do this.
-                    if dy >= tabs(activeTab).scrolly then
-                        Put (c, dx, dy, vx, vy);
-                    end if;
-
-                    -- adjust number of lines even if not viewable so the
-                    -- scrollbar is accurate.
-                    tabs(activeTab).lines := @ + 1;
-                elsif nextWordLength + vx > w - 3 then
-                    -- ignore the space and just start the word at the next line.
-                    if dy >= tabs(activeTab).scrolly then
-                        vy := vy + 1;
-                        vx := VIEWPORT_STARTX;
-                        Console.setCursor (vx, vy);
-                    end if;
-
-                    tabs(activeTab).lines := @ + 1;
-                    -- Put_Line (Standard_Error, "word wrap" & nextWordLength'Image);
-                else
-                    -- print the space.
-                    if dy >= tabs(activeTab).scrolly then
-                        Put (c, dx, dy, vx, vy);
-                    end if;
-                end if;
-
-                i := i + 1;
+            if dy >= tabs(activeTab).scrolly then
+                renderLine (tabs(activeTab).pageContents, i, dx, dy, vx, vy);
             else
-                if dy >= tabs(activeTab).scrolly then
-                    Put (c, dx, dy, vx, vy);
-                end if;
-
-                i := i + 1;
+                invisibleLine (tabs(activeTab).pageContents, i, dx, dy);
             end if;
 
-            -- note: we don't always want to increment i, since when we get a LF
-            -- the skipFormatting procedure will take care of that for us.
-        end loop;
+        end loop renderLoop;
+
+        -- Determine initial line type
+        -- curLineType := nextLineType (tabs(activeTab).pageContents, i);
+
+        -- if dy >= tabs(activeTab).scrolly then
+        --     -- do formatting if we're within the viewable area.
+        --     setStyle (curLineType);
+        --     skipFormatting (curLineType, i);
+        -- else
+        --     i := 1;
+        -- end if;
+
+        -- -- reset number of lines if page is dirty and we have to re-render
+        -- tabs(activeTab).lines := 1;
+
+        -- -- We iterate over the entire page until
+        -- -- the document coordinates are after the start of our scroll
+        -- -- location, then start rendering. When we reach the end of the viewport
+        -- -- we stop rendering.
+        -- loop
+        --     exit when i > tabs(activeTab).pageContents.Length;
+        --     exit when vy >= VIEWPORT_ENDY;
+
+        --     c := Element (tabs(activeTab).pageContents, i);
+
+        --     if c = ASCII.LF or c = ASCII.CR then
+        --         -- advance document coordinates no matter what.
+        --         dx := 1;
+        --         dy := dy + 1;
+        --         tabs(activeTab).lines := @ + 1;
+
+        --         -- Determine the type of the next line.
+        --         curLineType := nextLineType (tabs(activeTab).pageContents, i);
+
+        --         -- only do rendering if we're past the start of our
+        --         -- scrolled-to area.
+        --         if dy > tabs(activeTab).scrolly then
+        --             -- advance viewport coords to next line
+        --             vx := 3;
+        --             vy := vy + 1;
+        --             Console.setCursor (vx, vy);
+
+        --             setStyle (curLineType);
+        --             skipFormatting (curLineType, i);
+
+        --             -- If the next line is a link, then instead of printing it
+        --             -- character by character, we'll render a Button whose label is
+        --             -- either the href or the description (if one is provided).
+        --             if curLineType = LINK then
+
+        --                 renderLink: declare
+        --                     href : Unbounded_String := Null_Unbounded_String;
+        --                     desc : Unbounded_String := Null_Unbounded_String;
+        --                 begin
+        --                     parseLink (tabs(activeTab).pageContents, i, href, desc);
+
+        --                     -- clip button by display width. When we get horizontal
+        --                     -- scrolling done we'll want to adjust the lower bound
+        --                     -- of this slice by startx
+        --                     if desc.Length > w - 3 then
+        --                         desc := Unbounded_Slice (desc, 1, w - 3);
+        --                     end if;
+
+        --                     if Button (st      => st,
+        --                                x       => vx,
+        --                                y       => vy,
+        --                                label   => desc.To_String,
+        --                                tooltip => href.To_String,
+        --                                fg      => Colors.currentTheme.unvisitedLink,
+        --                                bg      => Colors.currentTheme.bg) then
+                                
+        --                         Exit_Scope (st);
+        --                         setStyle (Plain);
+
+        --                         loadPage (st, href);
+        --                         return;
+        --                     end if;
+        --                 end renderLink;
+        --             end if;
+        --         else
+        --             i := i + 1;
+        --         end if;
+        --     elsif c = ' ' or c = ASCII.HT then
+        --         -- At a space or tab. Determine how long the next word is. If
+        --         -- it's longer than the viewport width, then just go ahead and
+        --         -- keep rendering it and let the default character handling 
+        --         -- (which wraps at viewport edge) do its thing. If the word is shorter
+        --         -- than the viewport width, but its too long to render within the
+        --         -- viewport, then insert a manual line break.
+        --         nextWordLength := getNextWordLength (tabs(activeTab).pageContents, i);
+
+        --         if nextWordLength > w - 3 then
+        --             -- word is longer than the viewport, so just accept default behavior
+        --             -- (overflow to next line). Adjust the number of lines in the
+        --             -- document when we do this.
+        --             if dy >= tabs(activeTab).scrolly then
+        --                 Put (c, dx, dy, vx, vy);
+        --             end if;
+
+        --             -- adjust number of lines even if not viewable so the
+        --             -- scrollbar is accurate.
+        --             tabs(activeTab).lines := @ + 1;
+        --         elsif nextWordLength + vx > w - 3 then
+        --             -- ignore the space and just start the word at the next line.
+        --             if dy >= tabs(activeTab).scrolly then
+        --                 vy := vy + 1;
+        --                 vx := VIEWPORT_STARTX;
+        --                 Console.setCursor (vx, vy);
+        --             end if;
+
+        --             tabs(activeTab).lines := @ + 1;
+        --             -- Put_Line (Standard_Error, "word wrap" & nextWordLength'Image);
+        --         else
+        --             -- print the space.
+        --             if dy >= tabs(activeTab).scrolly then
+        --                 Put (c, dx, dy, vx, vy);
+        --             end if;
+        --         end if;
+
+        --         i := i + 1;
+        --     else
+        --         if dy >= tabs(activeTab).scrolly then
+        --             Put (c, dx, dy, vx, vy);
+        --         end if;
+
+        --         i := i + 1;
+        --     end if;
+
+        --     -- note: we don't always want to increment i, since when we get a LF
+        --     -- the skipFormatting procedure will take care of that for us.
+        -- end loop;
 
         Exit_Scope (st);
 
@@ -1161,18 +1353,26 @@ package body Gembrowse.UI is
     procedure footer (st : in out Gembrowse.UI.State.UIState) is
         w : Natural := st.Window_Width;
         h : Natural := st.Window_Height;
+
+        FOOTER_LINE : constant Natural := h - 1;
     begin
+        Console.setCursor (2, FOOTER_LINE);
+
         box (1, h-2, w, h, "╠", "╣", "╚", "╝");
 
-        Console.setCursor (2, h-1);
+        Console.setCursor (2, FOOTER_LINE);
         Console.setBGColor (Colors.currentTheme.bg);
         Console.setColor (Colors.currentTheme.note);
-        if Length (st.tooltip) > 0 then
-            Put (To_String (st.tooltip));
 
-            for i in Length (st.tooltip) .. w - 4 loop
-                Put (" ");
-            end loop;
+        if Length (st.tooltip) > 0 then
+
+            if st.tooltip.Length > w - 4 then
+                Put (To_String (st.tooltip)(1 .. w - 4));
+            else
+                for i in Length (st.tooltip) .. w - 4 loop
+                    Put (" ");
+                end loop;
+            end if;
         else
             Put (To_String (tabs(activeTab).status));
             for i in Length (tabs(activeTab).status) .. w - 4 loop
@@ -1194,6 +1394,12 @@ package body Gembrowse.UI is
             Console.enableMouse;
             Console.setBGColor (Colors.currentTheme.bg);
             Console.clear;
+            
+            -- We have to recalculate the number of lines in each document
+            -- when this happens as well.
+            for tab of tabs loop
+                tab.lines := getLines (tab.pageContents, GUI_sTATE.Window_Width);
+            end loop;
         end handle;
     end Sigwinch_Handler;
 
