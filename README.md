@@ -1,8 +1,4 @@
-# TODO
-
-* Copy+Paste. Paste works, but not for Unicode chars. Copy doesn't work yet.
-
-# Gembrowse: Probably the Best Gemini Browser.
+# Gembrowse: A Gemini browser for people with kids
 
 # Features
 
