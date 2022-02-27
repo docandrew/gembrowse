@@ -31,7 +31,7 @@ package body Gembrowse.UI.Scrollbars is
         id      : constant Gembrowse.UI.State.ID := Gembrowse.UI.State.Next_ID (st);
         scope   : constant Gembrowse.UI.State.Scope_ID := st.Curr_Scope;
 
-        cellsPerVal : constant Float := Float(Width - 2) / Float(Max - Min);
+        cellsPerVal : constant Float := (if Max = Min then 0.0 else Float(Width - 2) / Float(Max - Min));
         xpos : constant Positive := Integer(Float(Val - Min) * cellsPerVal) + 1;
 
         -- Slider between the two buttons.
@@ -79,7 +79,7 @@ package body Gembrowse.UI.Scrollbars is
                     Mouse_Pos : Integer := Integer(st.Mouse_x) - Integer(x);
                     New_Val : Integer;
                 begin
-                    st.Tooltip := To_Unbounded_String ("Val:" & Val'Image & " xpos:" & xpos'Image);
+                    st.Tooltip := To_Unbounded_String ("Val:" & Val'Image & " xpos:" & xpos'Image & " max:" & Max'Image);
 
                     -- if Mouse_Pos < Min then
                     --     Mouse_Pos := Min;
@@ -187,8 +187,8 @@ package body Gembrowse.UI.Scrollbars is
         id      : constant Gembrowse.UI.State.ID := Gembrowse.UI.State.Next_ID (st);
         scope   : constant Gembrowse.UI.State.Scope_ID := st.Curr_Scope;
 
-        cellsPerVal : constant Float := Float(Height - 2) / Float(Max - Min);
-        ypos : constant Positive := Integer(Float(Val - Min) * cellsPerVal) + 1;
+        cellsPerVal : constant Float    := (if Max = Min then 0.0 else Float(Height - 2) / Float(Max - Min));
+        ypos        : constant Positive := Integer(Float(Val - Min) * cellsPerVal) + 1;
 
         -- Slider between the two buttons.
         function Vertical_Slider return Boolean is
@@ -237,7 +237,7 @@ package body Gembrowse.UI.Scrollbars is
                     Mouse_Pos : Integer := Integer(st.Mouse_y) - Integer(y);
                     New_Val : Integer;
                 begin
-                    st.Tooltip := To_Unbounded_String ("Val:" & Val'Image & " ypos:" & ypos'Image);
+                    st.Tooltip := To_Unbounded_String ("Val:" & Val'Image & " ypos:" & ypos'Image & " max:" & Max'Image);
 
                     -- if Mouse_Pos < Min then
                     --     Mouse_Pos := Min;

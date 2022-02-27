@@ -188,6 +188,11 @@ package Gembrowse.UI.State is
 
         Error           : Error_Code := NO_ERROR;
         Error_Msg       : Unbounded_String;
+
+        -- We don't want to re-render the page or address bar unless something
+        -- changed in it. Keep track of that here.
+        Page_Dirty      : Boolean := True;
+        Address_Dirty   : Boolean := True;
     end record
         with Dynamic_Predicate => (Cursor_Pos = Selection_Start or Cursor_Pos = Selection_End);
 

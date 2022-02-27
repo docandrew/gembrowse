@@ -352,7 +352,7 @@ package body Gembrowse.UI.Text_Field is
         Text_Draw_Offset : constant Positive := 1;
         
         Cursor_Click_Update : Boolean := False;
-        Cursor_Drag_Update : Boolean := False;
+        Cursor_Drag_Update  : Boolean := False;
 
         Hit_Enter : Boolean;
 
@@ -362,11 +362,8 @@ package body Gembrowse.UI.Text_Field is
 
         -- Check for mouseover/click
         if Region_Hit(st, x, y, x + Display_Length, y) then
-            st.Hot_Item := id;
+            st.Hot_Item  := id;
             st.Hot_Scope := scope;
-
-            -- Update our cursor to the little text dealie
-            -- SDL.Inputs.Mice.Cursors.Set_Cursor(Gembrowse.UI.State.Text_Cursor);
 
             -- Clicking on a text field gives us keyboard focus, also 
             --  updates the cursor location.
@@ -429,7 +426,6 @@ package body Gembrowse.UI.Text_Field is
             for i in 1 .. Display_Length loop
                 Put (" ");
             end loop;
-            null;
         end if;
 
         -- If we are still active, then update cursor based on mouse position
@@ -446,8 +442,8 @@ package body Gembrowse.UI.Text_Field is
 
             Text_x          : Positive := x + Text_Draw_Offset;
             Cursor_x        : Positive := x + Text_Draw_Offset;
-            Text_BG_Color   : Colors.ThemeColor;
-            Text_FG_Color   : Colors.ThemeColor;
+            -- Text_BG_Color   : Colors.ThemeColor;
+            -- Text_FG_Color   : Colors.ThemeColor;
             Selection_Dir   : Selection_Direction := Get_Selection_Direction (st);
         begin
             Console.setCursor (Text_x, y);
@@ -459,7 +455,8 @@ package body Gembrowse.UI.Text_Field is
                 Put (To_String (Text));
             else
                 if UBS.Length(Text) > 0 then
-                    -- determine which characters we're actually drawing.
+                    -- @TODO determine which characters we're actually drawing based on display size,
+                    -- cursor location
 
                     -- render character-by-character so we can apply
                     -- correct styles to selection and get accurate cursor
@@ -502,13 +499,9 @@ package body Gembrowse.UI.Text_Field is
 
                             Cursor_Click_Update := False;
                         elsif Cursor_Drag_Update and Text_x >= st.Mouse_x and not st.Word_Select then
-                            --@TODO handle expansion of selection when st.Word_Select is on.
-                            --Ada.Text_IO.Put_Line ("drag" & i'Image);
-                            -- st.tooltip := To_Unbounded_String ("Dragging" & i'Image & st.Mouse_x'Image);
                             -- if dragging the mouse, set cursor and adjust the
                             -- selection based on direction.
                             if i > st.Cursor_Pos then
-                                --Ada.Text_IO.Put_Line ("left");
                                 -- moved cursor left
                                 if Selection_Dir = LEFT then
                                     -- grow selection left
@@ -520,7 +513,6 @@ package body Gembrowse.UI.Text_Field is
                                     st.Selection_End := st.Cursor_Pos;
                                 end if;
                             elsif i < st.Cursor_Pos then
-                                --Ada.Text_IO.Put_Line ("right");
                                 -- moved cursor right
                                 if Selection_Dir = RIGHT then
                                     -- grow selection right
@@ -561,7 +553,6 @@ package body Gembrowse.UI.Text_Field is
                     -- If we haven't updated the Cursor by this point, it
                     --  was to the right of the text we just rendered.
                     if Cursor_Click_Update then
-                        --Ada.Text_IO.Put_Line("click2 at end");
                         st.Cursor_Pos := UBS.Length (Text) + 1;
                         st.Selection_Start := st.Cursor_Pos;
                         st.Selection_End := st.Selection_Start;
@@ -570,7 +561,6 @@ package body Gembrowse.UI.Text_Field is
                     end if;
 
                     if Cursor_Drag_Update and not st.Word_Select then
-                        --Ada.Text_IO.Put_Line("drag2 at end");
                         st.Cursor_Pos := UBS.Length (Text) + 1;
                         st.Selection_End := st.Cursor_Pos;
                         
@@ -594,7 +584,6 @@ package body Gembrowse.UI.Text_Field is
                 -- draw rest of text field empty
                 -- @TODO either do this or paint the background ahead of time.
                 -- Console.setBGColor (Colors.currentTheme.editorLine);
-
                 -- for c in UBS.Length (Text) .. Display_Length - Text_Draw_Offset - 4 loop
                 --     Put (" ");
                 -- end loop;

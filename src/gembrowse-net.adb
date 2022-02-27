@@ -73,11 +73,9 @@ package body Gembrowse.Net is
     ---------------------------------------------------------------------------
     -- fetchPage
     ---------------------------------------------------------------------------
-    function fetchPage (urlstr : Unbounded_String;
-                        page   : out Unbounded_String;
-                        header : out Unbounded_String;
-                        lines  : out Natural;
-                        cols   : out Natural) return Boolean is
+    function fetchPage (urlstr   : Unbounded_String;
+                        page     : out Unbounded_String;
+                        header   : out Unbounded_String) return Boolean is
 
         use Gembrowse.URL;
 
@@ -108,17 +106,17 @@ package body Gembrowse.Net is
         inHeader      : Boolean := True;
 
         -- Keep track of longest line, length of current line and number of lines.
-        lineLength  : Natural := 0;
-        longestLine : Natural := 0;
-        numLines    : Natural := 0;
+        -- lineLength  : Natural := 0;
+        -- longestLine : Natural := 0;
+        -- numLines    : Natural := 0;
 
         use Util;       -- Util.max
     begin
         -- init out params
-        page   := Null_Unbounded_String;
-        header := Null_Unbounded_String;
-        lines  := 0;
-        cols   := 0;
+        page     := Null_Unbounded_String;
+        header   := Null_Unbounded_String;
+        -- newlines := 0;
+        -- cols     := 0;
 
         Gembrowse.URL.parseURL (boundedURL, parsedURL);
 
@@ -212,19 +210,19 @@ package body Gembrowse.Net is
                     else
                         Append (page, recvBuf (i));
 
-                        if recvBuf(i) = ASCII.LF then
-                            numLines := numLines + 1;
-                            longestLine := max (longestLine, lineLength);
-                        else
-                            lineLength := lineLength + 1;
-                        end if;
+                        -- if recvBuf(i) = ASCII.LF then
+                        --     numLines := numLines + 1;
+                        --     longestLine := max (longestLine, lineLength);
+                        -- else
+                        --     lineLength := lineLength + 1;
+                        -- end if;
                     end if;
                 end loop;
             end if;
         end loop readLoop;
 
-        cols  := longestLine;
-        lines := numLines;
+        -- cols     := longestLine;
+        -- newlines := numLines;
 
         -- Put_Line (Standard_Error, "Received" & bytesRead'Image & " bytes");
         -- Put_Line (Standard_Error, "Received " & To_String (page));

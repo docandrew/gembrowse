@@ -46,14 +46,10 @@ package Gembrowse.net is
     -- Connects to the host specified by the urlstr, sends it the Gemini
     -- request for that URL, and reads the response from the server.
     -- We copy the response from this procedure's internal read buffer into the
-    -- @param page. As we do so, we keep track of the size of the longest line
-    -- in the document and the number of lines in the document. This way we can
-    -- adjust the scrollbars accordingly in the UI when we render the page.
+    -- @param page.
     ---------------------------------------------------------------------------
-    function fetchPage (urlstr : Unbounded_String; 
-                        page   : out Unbounded_String;
-                        header : out Unbounded_String;
-                        lines  : out Natural;
-                        cols   : out Natural) return Boolean;
+    function fetchPage (urlstr   : Unbounded_String; 
+                        page     : out Unbounded_String;
+                        header   : out Unbounded_String) return Boolean;
 
 end Gembrowse.net;

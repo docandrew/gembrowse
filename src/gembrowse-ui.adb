@@ -72,10 +72,10 @@ package body Gembrowse.UI is
         header       : Unbounded_String;    -- server response header
         pageContents : Unbounded_String;
         bookmarked   : Boolean := False;
-        startx       : Positive := 1;       -- beginning of page we've scrolled to
-        starty       : Positive := 1;
-        lines        : Natural := 0;        -- number of lines in document
-        cols         : Natural := 0;        -- widest number of columns of document
+        scrollx      : Positive := 1;       -- (may disable this functionality)
+        scrolly      : Positive := 1;       -- beginning of page we've scrolled to
+        lines        : Natural := 1;        -- number of lines in document
+        cols         : Natural := 1;        -- widest number of columns of document
         status       : Unbounded_String;    -- status bar at bottom
         history      : Histories.List;      -- per-tab history
         historyIdx   : Histories.Cursor;    -- where in the history chain we are
@@ -86,8 +86,8 @@ package body Gembrowse.UI is
     tabs : PageStates.Vector;
 
     -- For testing. The actual scrollbar limits will be baked into the PageState.
-    scrollx : Natural := 0;
-    scrolly : Natural := 0;
+    -- scrollx : Natural := 0;
+    -- scrolly : Natural := 0;
 
     -- fwd declarations
     procedure clearPage (st : in out Gembrowse.UI.State.UIState);
@@ -141,6 +141,10 @@ package body Gembrowse.UI is
     procedure switchTab (st : in out Gembrowse.UI.State.UIState; tabNum : Positive) is
     begin
         clearPage (st);
+
+        -- Force a re-render
+        st.Page_Dirty    := True;
+        st.Address_Dirty := True;
         
         tabs(activeTab).cursorPos := st.Cursor_Pos;     -- save old cursor position for current tab
         st.Selection_Start := 1;                        -- deselect any selected text.
@@ -187,18 +191,24 @@ package body Gembrowse.UI is
     -- scrollUp
     -- Scroll the current viewport up by the specified number of lines.
     ---------------------------------------------------------------------------
-    procedure scrollUp (lines : Positive := 1) is
+    procedure scrollUp (st : in out Gembrowse.UI.State.UIState; lines : Positive := 1) is
     begin
-        null;
+        if tabs(activeTab).scrolly >= 0 + lines then
+            tabs(activeTab).scrolly := @ - lines;
+            st.Page_Dirty := True;
+        end if;
     end scrollUp;
 
     ---------------------------------------------------------------------------
     -- scrollDown
     -- Scroll the current viewport down by the specified number of lines.
     ---------------------------------------------------------------------------
-    procedure scrollDown (lines : Positive := 1) is
+    procedure scrollDown (st : in out Gembrowse.UI.State.UIState; lines : Positive := 1) is
     begin
-        null;
+        if tabs(activeTab).scrolly <= tabs(activeTab).lines - lines then
+            tabs(activeTab).scrolly := @ + lines;
+            st.Page_Dirty := True;
+        end if;
     end scrollDown;
 
     ---------------------------------------------------------------------------
@@ -314,6 +324,10 @@ package body Gembrowse.UI is
 
         clearPage (st);
 
+        -- Force re-render
+        st.Page_Dirty := True;
+        st.scrolly := 1;
+
         -- Take a look at the URL.
         -- @TODO enforce length < 1024
         if Index (url, " ", 1) /= 0 then
@@ -339,13 +353,11 @@ package body Gembrowse.UI is
             -- @TODO handle relative URLs.
             actualURL := To_Unbounded_String ("gemini://" & To_String (url));
         else
-        
             actualURL := url;
-        
         end if;
 
         tabs(activeTab).url := actualURL;
-        GUI_State.tooltip := To_Unbounded_String ("Loading " & To_String (actualURL));
+        GUI_State.tooltip   := To_Unbounded_String ("Loading " & To_String (actualURL));
 
         if actualURL.Length > 1024 then
             st.Tooltip := To_Unbounded_String ("URL is too long (max length for Gemini is 1024)");
@@ -354,10 +366,9 @@ package body Gembrowse.UI is
 
         if not Gembrowse.net.fetchPage (actualURL, 
                                         tabs(activeTab).pageContents,
-                                        tabs(activeTab).header,
-                                        tabs(activeTab).lines,
-                                        tabs(activeTab).cols) then
+                                        tabs(activeTab).header) then
             tabs(activeTab).status := To_Unbounded_String ("Error loading " & To_String (actualURL));
+            GUI_State.tooltip := tabs(activeTab).status;
         else
             historyNew (st, actualURL);
         end if;
@@ -949,6 +960,7 @@ package body Gembrowse.UI is
 
         use Gembrowse.UI.Buttons;
     begin
+
         Console.setBGColor (Colors.currentTheme.bg);
         Console.setColor (Colors.currentTheme.ui);
 
@@ -968,20 +980,26 @@ package body Gembrowse.UI is
                                x      => w - 1,
                                y      => 6,
                                Height => h - 10,
-                               Min    => 0,
-                               Max    => 100,
-                               Val    => scrolly) then
-            null;
+                               Min    => 1,
+                               Max    => tabs(activeTab).lines,
+                               Val    => tabs(activeTab).scrolly) then
+            st.Page_Dirty := True;
         end if;
 
+        -- not implemented yet
         if Horizontal_Scrollbar (st    => st,
                                  x     => 2,
                                  y     => h - 3,
                                  Width => w - 4,
-                                 Min   => 0,
-                                 Max   => 100,
-                                 Val   => scrollx) then
-            null;
+                                 Min   => 1,
+                                 Max   => tabs(activeTab).lines,
+                                 Val   => tabs(activeTab).scrollx) then
+            st.Page_Dirty := True;
+        end if;
+
+        -- No need to re-render the page if nothing changed on it.
+        if st.Page_Dirty then
+            clearPage (st);
         end if;
 
         -- add square between horiz and vert scrollbars to make it look a little nicer.
@@ -999,69 +1017,84 @@ package body Gembrowse.UI is
         -- within the page itself.
         Enter_Scope (st);
 
-        -- Determine initial line type.
-        curLineType := nextLineType (tabs(activeTab).pageContents, i);
-        setStyle (curLineType);
-        skipFormatting (curLineType, i);
+        -- Determine initial line type (if we're within the viewable area).
+        if dy >= tabs(activeTab).scrolly then
+            curLineType := nextLineType (tabs(activeTab).pageContents, i);
+            setStyle (curLineType);
+            skipFormatting (curLineType, i);
+        else
+            i := 1;
+        end if;
+
+        -- reset number of lines if page is dirty and we have to re-render
+        tabs(activeTab).lines := 1;
 
         -- We iterate over the entire page until
-        -- the material being rendered is within the current viewport. Once
-        -- we exceed the viewport height we stop rendering.
+        -- the document coordinates are after the start of our scroll
+        -- location, then start rendering. When we reach the end of the viewport
+        -- we stop rendering.
         loop
             exit when i > tabs(activeTab).pageContents.Length;
-            exit when vy > VIEWPORT_ENDY;
+            exit when vy >= VIEWPORT_ENDY;
 
             c := Element (tabs(activeTab).pageContents, i);
 
             if c = ASCII.LF or c = ASCII.CR then
-                -- advance document and viewport coordinates.
-                dy := dy + 1;
+                -- advance document coordinates no matter what.
                 dx := 1;
+                dy := dy + 1;
+                tabs(activeTab).lines := @ + 1;
 
-                vx := 3;
-                vy := vy + 1;
+                -- only do rendering if we're past the start of our
+                -- scrolled-to area.
+                if dy >= tabs(activeTab).scrolly then
+                    vx := 3;
+                    vy := vy + 1;
 
-                Console.setCursor (vx, vy);
+                    Console.setCursor (vx, vy);
 
-                -- Determine the type of the next line.
-                curLineType := nextLineType (tabs(activeTab).pageContents, i);
+                    -- Determine the type of the next line.
+                    curLineType := nextLineType (tabs(activeTab).pageContents, i);
 
-                setStyle (curLineType);
-                skipFormatting (curLineType, i);
+                    setStyle (curLineType);
+                    skipFormatting (curLineType, i);
 
-                -- If the next line is a link, then instead of printing it
-                -- character by character, we'll render a Button whose label is
-                -- either the href or the description (if one is provided).
-                if curLineType = LINK then
+                    -- If the next line is a link, then instead of printing it
+                    -- character by character, we'll render a Button whose label is
+                    -- either the href or the description (if one is provided).
+                    if curLineType = LINK then
 
-                    renderLink: declare
-                        href : Unbounded_String := Null_Unbounded_String;
-                        desc : Unbounded_String := Null_Unbounded_String;
-                    begin
-                        parseLink (tabs(activeTab).pageContents, i, href, desc);
+                        renderLink: declare
+                            href : Unbounded_String := Null_Unbounded_String;
+                            desc : Unbounded_String := Null_Unbounded_String;
+                        begin
+                            parseLink (tabs(activeTab).pageContents, i, href, desc);
 
-                        -- clip button by display width. When we get horizontal
-                        -- scrolling done we'll want to adjust the lower bound
-                        -- of this slice by startx
-                        if desc.Length > w - 3 then
-                            desc := Unbounded_Slice (desc, 1, w - 3);
-                        end if;
+                            -- clip button by display width. When we get horizontal
+                            -- scrolling done we'll want to adjust the lower bound
+                            -- of this slice by startx
+                            if desc.Length > w - 3 then
+                                desc := Unbounded_Slice (desc, 1, w - 3);
+                            end if;
 
-                        if Button (st      => st,
-                                   x       => vx,
-                                   y       => vy,
-                                   label   => desc.To_String,
-                                   tooltip => href.To_String,
-                                   fg      => Colors.currentTheme.unvisitedLink,
-                                   bg      => Colors.currentTheme.bg) then
-                            
-                            Exit_Scope (st);
-                            setStyle (Plain);
+                            if Button (st      => st,
+                                       x       => vx,
+                                       y       => vy,
+                                       label   => desc.To_String,
+                                       tooltip => href.To_String,
+                                       fg      => Colors.currentTheme.unvisitedLink,
+                                       bg      => Colors.currentTheme.bg) then
+                                
+                                Exit_Scope (st);
+                                setStyle (Plain);
 
-                            loadPage (st, href);
-                            return;
-                        end if;
-                    end renderLink;
+                                loadPage (st, href);
+                                return;
+                            end if;
+                        end renderLink;
+                    end if;
+                else
+                    i := i + 1;
                 end if;
             elsif c = ' ' or c = ASCII.HT then
                 -- At a space or tab. Determine how long the next word is. If
@@ -1074,23 +1107,37 @@ package body Gembrowse.UI is
 
                 if nextWordLength > w - 3 then
                     -- word is longer than the viewport, so just accept default behavior
-                    -- (overflow to next line)
-                    Put (c, dx, dy, vx, vy);
-                    -- Put_Line (Standard_Error, "really long" & nextWordLength'Image);
+                    -- (overflow to next line). Adjust the number of lines in the
+                    -- document when we do this.
+                    if dy >= tabs(activeTab).scrolly then
+                        Put (c, dx, dy, vx, vy);
+                    end if;
+
+                    -- adjust number of lines even if not viewable so the
+                    -- scrollbar is accurate.
+                    tabs(activeTab).lines := @ + 1;
                 elsif nextWordLength + vx > w - 3 then
                     -- ignore the space and just start the word at the next line.
-                    vy := vy + 1;
-                    vx := VIEWPORT_STARTX;
-                    Console.setCursor (vx, vy);
+                    if dy >= tabs(activeTab).scrolly then
+                        vy := vy + 1;
+                        vx := VIEWPORT_STARTX;
+                        Console.setCursor (vx, vy);
+                    end if;
+
+                    tabs(activeTab).lines := @ + 1;
                     -- Put_Line (Standard_Error, "word wrap" & nextWordLength'Image);
                 else
                     -- print the space.
-                    Put (c, dx, dy, vx, vy);
+                    if dy >= tabs(activeTab).scrolly then
+                        Put (c, dx, dy, vx, vy);
+                    end if;
                 end if;
 
                 i := i + 1;
             else
-                Put (c, dx, dy, vx, vy);
+                if dy >= tabs(activeTab).scrolly then
+                    Put (c, dx, dy, vx, vy);
+                end if;
 
                 i := i + 1;
             end if;
@@ -1102,6 +1149,9 @@ package body Gembrowse.UI is
         Exit_Scope (st);
 
         setStyle (Plain);
+
+        -- Freshly-rendered page
+        st.Page_Dirty := False;
     end renderPage;
 
     ---------------------------------------------------------------------------
@@ -1245,13 +1295,9 @@ package body Gembrowse.UI is
     begin
         -- mouse wheel
         if st.Mouse_Buttons.Button_4 then
-            if scrolly > 0 then
-                scrolly := scrolly - 10;
-            end if;
+            scrollUp (st, 5);
         elsif st.Mouse_Buttons.Button_5 then
-            if scrolly < 100 then
-                scrolly := scrolly + 10;
-            end if;
+            scrollDown (st, 5);
         end if;
 
         -- Ctrl key combos
