@@ -1,4 +1,4 @@
-# Gembrowse: A Gemini browser for people with kids
+# Gembrowse: A TUI [Gemini](https://gemini.circumlunar.space/) Browser
 
 This is a WORK IN PROGRESS! Many features are still unimplemented (or poorly
 implemented).
@@ -49,7 +49,7 @@ This is statically linked so Gembrowse can be distributed as a single binary.
 This project _does_ make use of Ada 202X features, so you'll probably need 
 GNAT 2021 to build it.
 
-## LibreSSL
+## [LibreSSL](https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/)
   
 Follow the build instructions or just download the binaries. Gembrowse
 statically links `libtls` and `libcrypto`. The Gembrowse project file will
