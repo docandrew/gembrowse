@@ -1,5 +1,10 @@
 # Gembrowse: A Gemini browser for people with kids
 
+This is a WORK IN PROGRESS! Many features are still unimplemented (or poorly
+implemented).
+
+![demo](./docs/demo.gif)
+
 # Features
 
 * It's just one file.
@@ -10,14 +15,6 @@
 
 Hover over any button to see the keyboard shortcut. They should be pretty
 close to what you are used to in Chrome or Firefox.
-
-## IDNA - International Domain Names in Applications.
-
-Plays nice with URLs like this one:
-
-To avoid phishing attacks, any non-ASCII domain names in links, etc. will be
-shown in their Punycode encoded format in the status bar and highlighted a
-different color in the status bar.
 
 # Installation
 
@@ -35,8 +32,8 @@ or anything like that.
 
 ## Bookmarks File
 
-Gemini will look for a file called `bookmarks.gmi` in the same folder it is
-running in. You can specify a different bookmarks folder with the `-b` option
+Gemini will look for a file called `.gembrowse-bookmarks.gmi` in your home
+folder. You can specify a different bookmarks folder with the `-b` option
 if you want to keep your bookmarks in a Dropbox folder or Git dotfiles repo
 or something like that to sync across devices.
 
@@ -49,8 +46,13 @@ associated system libraries like `librt` and `libpthread`, everything is written
 from scratch with the exception of TLS, which comes from the LibreSSL project.
 This is statically linked so Gembrowse can be distributed as a single binary.
 
-### LibreSSL
+This project _does_ make use of Ada 202X features, so you'll probably need 
+GNAT 2021 to build it.
+
+## LibreSSL
   
 Follow the build instructions or just download the binaries. Gembrowse
-statically links `libtls` and `libcrypto`.
+statically links `libtls` and `libcrypto`. The Gembrowse project file will
+look for `libcrypto.a` and `libtls.a` in the `lib/` folder (alongside `src/`)
 
+Once that's done, just run `make` in the top level folder.

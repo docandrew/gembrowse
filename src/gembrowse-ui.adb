@@ -902,7 +902,6 @@ package body Gembrowse.UI is
             end if;
         end nextLineType;
 
-
         -----------------------------------------------------------------------
         -- parseLink
         -- Given a text/gemini document containing a link, determine the URL and
@@ -1121,8 +1120,8 @@ package body Gembrowse.UI is
                             vx := VIEWPORT_STARTX;
                             Console.setCursor (vx, vy);
                         else
-                            -- print the space.
-                            Put (c, dx, dy, vx, vy);
+                            -- print the space (print tabs as spaces too for now).
+                            Put (' ', dx, dy, vx, vy);
                         end if;
                     else
                         -- normal char

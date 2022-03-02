@@ -124,12 +124,12 @@ package body Gembrowse.Net is
             return False;
         end if;
 
-        Put_Line (Standard_Error, "Attempting to connect to " & To_String (urlstr));
+        -- Put_Line (Standard_Error, "Attempting to connect to " & To_String (urlstr));
 
         fqdnPtr := New_String (URLStrings.To_String (parsedURL.host));
         portPtr := New_String (parsedURL.port'Image);
 
-        Put_Line (Standard_Error, "Connecting to " & URLStrings.To_String (parsedURL.host) & " port" & parsedURL.port'Image);
+        -- Put_Line (Standard_Error, "Connecting to " & URLStrings.To_String (parsedURL.host) & " port" & parsedURL.port'Image);
 
         -- init client context
         tlsContext := tls_client;
@@ -232,7 +232,8 @@ package body Gembrowse.Net is
         -- Some servers have an issue with the tls_close without EOF notify (?)
         -- We'll ignore it.
         if tls_close (tlsContext) /= 0 then
-            Put_Line (Standard_Error, "Warning: tls_close (" & Value (tls_error (tlsContext)) & ")");
+            -- Put_Line (Standard_Error, "Warning: tls_close (" & Value (tls_error (tlsContext)) & ")");
+            null;
         end if;
 
         tls_free (tlsContext);

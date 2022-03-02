@@ -39,7 +39,7 @@ package body Gembrowse.File is
 
             fullPath := To_Unbounded_String (parsed.host.To_String & parsed.path.To_String);
             
-            Put_Line (Standard_Error, "fullPath: " & fullPath.To_String);
+            -- Put_Line (Standard_Error, "fullPath: " & fullPath.To_String);
 
             Open (input, Ada.Text_IO.In_File, fullPath.To_String);
 
@@ -50,7 +50,7 @@ package body Gembrowse.File is
             Close (input);
         end if;
 
-        Put_Line (Standard_Error, "file contents: " & contents.To_String);
+        -- Put_Line (Standard_Error, "file contents: " & contents.To_String);
 
     exception
         --@TODO set tooltip here for file not found or bad permissions
